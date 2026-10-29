@@ -12,6 +12,8 @@ import time
 
 os.environ.setdefault("MINUTES_STORAGE_DIR", tempfile.mkdtemp(prefix="minutes-test-"))
 os.environ.setdefault("MINUTES_PIPELINE_SCALE", "60")
+# 单测不依赖真实密钥；生产由 MINUTES_JWT_SECRET 强制配置（见 test_security_hardening）
+os.environ.setdefault("MINUTES_ALLOW_INSECURE_JWT", "1")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -339,3 +341,56 @@ def test_permissions_matrix_and_delete():
         deleted = client.delete(f"/api/v1/meetings/{meeting_id}", headers=owner)
         assert deleted.status_code == 204
         assert client.get(f"/api/v1/meetings/{meeting_id}", headers=owner).status_code == 404
+
+
+def test_login_rate_limited_after_repeated_failures():
+    from app.ratelimit import reset_limiters
+
+    reset_limiters()
+    try:
+        with _client() as client:
+            for _ in range(5):
+                res = client.post(
+                    "/api/v1/auth/login",
+                    json={"email": DEMO_EMAIL, "password": "wrong-password"},
+                )
+                assert res.status_code == 401
+            blocked = client.post(
+                "/api/v1/auth/login",
+                json={"email": DEMO_EMAIL, "password": "wrong-password"},
+            )
+            assert blocked.status_code == 429
+            assert blocked.json()["error"]["code"] == "RATE_LIMITED"
+            assert blocked.json()["error"]["details"]["retry_after_seconds"] > 0
+
+            other = client.post(
+                "/api/v1/auth/login",
+                json={"email": "chen@minutes.dev", "password": DEMO_PASSWORD},
+            )
+            assert other.status_code == 200
+    finally:
+        reset_limiters()
+
+
+def test_dev_reset_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("MINUTES_ENABLE_RESET", raising=False)
+    with _client() as client:
+        assert client.post("/api/v1/dev/reset").status_code == 404
+
+
+def test_jwt_secret_is_required(monkeypatch):
+    import pytest
+
+    from app.security import _resolve_secret
+
+    monkeypatch.delenv("MINUTES_JWT_SECRET", raising=False)
+    monkeypatch.delenv("MINUTES_ALLOW_INSECURE_JWT", raising=False)
+    with pytest.raises(RuntimeError):
+        _resolve_secret()
+
+    monkeypatch.setenv("MINUTES_JWT_SECRET", "too-short")
+    with pytest.raises(RuntimeError):
+        _resolve_secret()
+
+    monkeypatch.setenv("MINUTES_JWT_SECRET", "x" * 40)
+    assert _resolve_secret() == "x" * 40

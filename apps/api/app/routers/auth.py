@@ -5,24 +5,42 @@ from fastapi import APIRouter, Request
 from ..api_utils import read_json, require_user
 from ..errors import ApiError, unauthorized, validation
 from ..http import ok
+from ..ratelimit import client_key, login_limiter, register_limiter
 from ..security import create_tokens, decode_refresh, hash_password, verify_password
 from ..store import db, get_user, new_id, now_iso, public_user, role_of, workspace_view
 
 router = APIRouter()
 
 
+def _too_many(retry_after: int) -> ApiError:
+    return ApiError(
+        429,
+        "RATE_LIMITED",
+        "尝试过于频繁，请稍后再试",
+        {"retry_after_seconds": retry_after},
+    )
+
+
 @router.post("/auth/register")
 async def register(request: Request):
+    ip_key = client_key(request)
+    wait = register_limiter.retry_after(ip_key)
+    if wait:
+        raise _too_many(wait)
+
     body = await read_json(request)
     email = str(body.get("email") or "").strip()
     password = str(body.get("password") or "")
     name = str(body.get("name") or "").strip()
 
     if any(u["email"] == email for u in db["users"]):
+        register_limiter.record(ip_key)
         raise validation("该邮箱已注册", {"email": "该邮箱已注册"})
     if len(password) < 8:
+        register_limiter.record(ip_key)
         raise validation("密码至少 8 位", {"password": "密码至少 8 位"})
     if not name:
+        register_limiter.record(ip_key)
         raise validation("请填写姓名", {"name": "不能为空"})
 
     user = {
@@ -55,9 +73,17 @@ async def login(request: Request):
     body = await read_json(request)
     email = str(body.get("email") or "").strip()
     password = str(body.get("password") or "")
+
+    attempt_key = client_key(request, email)
+    wait = login_limiter.retry_after(attempt_key)
+    if wait:
+        raise _too_many(wait)
+
     user = next((u for u in db["users"] if u["email"] == email), None)
     if not user or not verify_password(password, user.get("password_hash")):
+        login_limiter.record(attempt_key)
         raise unauthorized("邮箱或密码不正确")
+    login_limiter.clear(attempt_key)
     user["last_login_at"] = now_iso()
     return ok(create_tokens(user["id"]))
 

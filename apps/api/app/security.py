@@ -11,7 +11,40 @@ import time
 
 import jwt
 
-SECRET = os.getenv("MINUTES_JWT_SECRET", "minutes-dev-secret-change-me-please-override-in-prod")
+_DEV_FALLBACK = "minutes-dev-secret-change-me-please-override-in-prod"
+_INSECURE_SECRETS = {
+    _DEV_FALLBACK,
+    "change-me-to-a-32-plus-char-secret",
+    "secret",
+    "changeme",
+}
+_MIN_SECRET_LEN = 24
+
+
+def _resolve_secret() -> str:
+    """强制显式配置 JWT 密钥：缺失、过短或使用示例值即拒绝启动。
+
+    本地单测/演示可用 MINUTES_ALLOW_INSECURE_JWT=1 显式放行（会退回进程内固定值）。
+    """
+    raw = (os.getenv("MINUTES_JWT_SECRET") or "").strip()
+    if raw and len(raw) >= _MIN_SECRET_LEN and raw not in _INSECURE_SECRETS:
+        return raw
+    allow_insecure = (os.getenv("MINUTES_ALLOW_INSECURE_JWT") or "").strip().lower()
+    if allow_insecure in ("1", "true", "yes", "on"):
+        return raw or _DEV_FALLBACK
+    if not raw:
+        raise RuntimeError(
+            "MINUTES_JWT_SECRET 未配置：请设置至少 24 位的随机密钥"
+            "（生成：openssl rand -hex 32）。本地演示可设 MINUTES_ALLOW_INSECURE_JWT=1。"
+        )
+    if len(raw) < _MIN_SECRET_LEN:
+        raise RuntimeError(
+            f"MINUTES_JWT_SECRET 过短（当前 {len(raw)} 位，至少 {_MIN_SECRET_LEN} 位），拒绝启动"
+        )
+    raise RuntimeError("MINUTES_JWT_SECRET 使用了示例/默认值，拒绝启动；请换成随机密钥")
+
+
+SECRET = _resolve_secret()
 ALGORITHM = "HS256"
 ACCESS_TTL = int(os.getenv("MINUTES_ACCESS_TTL", "3600"))
 REFRESH_TTL = int(os.getenv("MINUTES_REFRESH_TTL", str(30 * 24 * 3600)))

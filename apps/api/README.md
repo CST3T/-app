@@ -12,6 +12,9 @@
 cd apps/api
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# 必填：至少 24 位随机密钥（缺失/过短/示例值会拒绝启动）
+$env:MINUTES_JWT_SECRET = -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+# 不想设密钥时，本地可临时放行：$env:MINUTES_ALLOW_INSECURE_JWT = '1'
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -55,12 +58,13 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `MINUTES_JWT_SECRET` | dev 值 | JWT 签名密钥，**上线必须替换** |
+| `MINUTES_JWT_SECRET` | **无，必填** | JWT 签名密钥（≥24 位），缺失/过短/示例值拒绝启动 |
+| `MINUTES_ALLOW_INSECURE_JWT` | `0` | 本地单测/无密钥演示时放行固定开发密钥，生产禁止 |
 | `MINUTES_ACCESS_TTL` | `3600` | access token 秒数 |
 | `MINUTES_STORAGE_DIR` | `apps/api/storage` | 附件/音频目录 |
 | `MINUTES_PIPELINE_SCALE` | `1` | 流水线倍速，测试可调大（如 `60`） |
 | `MINUTES_LOG_FORMAT` | `text` | 日志格式：`text` / `json` |
-| `MINUTES_ENABLE_RESET` | `1` | 是否开放 `POST /dev/reset`，生产设 `0` |
+| `MINUTES_ENABLE_RESET` | `0` | 是否开放 `POST /dev/reset`，本地 E2E 需显式置 `1` |
 | `DATABASE_URL` | 空 | 配置后 `/ready` 会真实探测 PostgreSQL（本地内存模式留空） |
 | `REDIS_URL` | 空 | 配置后 `/ready` 探测 Redis |
 | `S3_ENDPOINT` | 空 | 配置后 `/ready` 探测对象存储；不配则检查本地存储目录可写 |
@@ -73,7 +77,7 @@ cd apps/api
 ```
 
 前端 E2E 连真实后端时，后端是全局状态（Mock 是每页重建种子），因此需要每个用例前恢复种子。
-已提供 `POST /api/v1/dev/reset`（设置 `MINUTES_ENABLE_RESET=0` 可关闭），并在前端 E2E 夹具里用
+已提供 `POST /api/v1/dev/reset`（**默认关闭**，需设 `MINUTES_ENABLE_RESET=1` 后重启后端），并在前端 E2E 夹具里用
 `E2E_RESET_API` 启用自动重置：
 
 ```powershell

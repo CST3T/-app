@@ -107,9 +107,9 @@ app.include_router(collaboration.router, prefix=API_PREFIX)
 async def dev_reset():
     """恢复种子数据，仅用于本地演示与 E2E 测试隔离。
 
-    默认开启，生产部署请设置 MINUTES_ENABLE_RESET=0 关闭。
+    默认关闭（生产安全），本地演示/E2E 需显式设置 MINUTES_ENABLE_RESET=1。
     """
-    if os.getenv("MINUTES_ENABLE_RESET", "1").lower() in ("0", "false", "off"):
+    if os.getenv("MINUTES_ENABLE_RESET", "0").lower() not in ("1", "true", "yes", "on"):
         return http.error_response(404, "NOT_FOUND", "Not Found")
     db.clear()
     db.update(build_seed())
