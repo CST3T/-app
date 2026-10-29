@@ -29,7 +29,7 @@ from ..store import (
     now_iso,
     role_of,
 )
-from ..storage import ATTACHMENT_DIR, AUDIO_DIR, attachment_bytes, delete_attachment_file
+from ..storage import attachment_bytes, attachment_url_for, audio_url_for, delete_attachment_file, save_attachment, save_audio
 
 router = APIRouter()
 
@@ -167,11 +167,7 @@ async def create_meeting(wid: str, request: Request):
         "error": None,
     }
     db["meetings"].insert(0, meeting)
-
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    path = AUDIO_DIR / f"{meeting_id}.{ext}"
-    path.write_bytes(audio_bytes)
-    db["audio_files"][meeting_id] = str(path)
+    save_audio(meeting, audio_bytes)
 
     roster = [
         {
@@ -237,7 +233,9 @@ async def create_meeting(wid: str, request: Request):
 @router.get("/meetings/{meeting_id}")
 async def get_meeting(meeting_id: str, request: Request):
     meeting, _user, role = guard_meeting(request, meeting_id)
-    return ok(build_meeting_detail(meeting, role))
+    detail = build_meeting_detail(meeting, role)
+    detail["audio_url"] = audio_url_for(meeting)
+    return ok(detail)
 
 
 @router.patch("/meetings/{meeting_id}")
@@ -283,13 +281,7 @@ async def replace_audio(meeting_id: str, request: Request):
     ext = audio.filename.rsplit(".", 1)[-1] if audio.filename and "." in audio.filename else "m4a"
     meeting["audio_key"] = f"{meeting['workspace_id']}/{meeting['id']}/original.{ext}"
     meeting["audio_bytes"] = len(data)
-
-    from ..storage import AUDIO_DIR
-
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    path = AUDIO_DIR / f"{meeting_id}.{ext}"
-    path.write_bytes(data)
-    db["audio_files"][meeting_id] = str(path)
+    save_audio(meeting, data)
     return ok(meeting, 201)
 
 
@@ -547,7 +539,7 @@ async def list_attachments(meeting_id: str, request: Request):
         key=lambda a: a["created_at"],
         reverse=True,
     )
-    return ok(items)
+    return ok([{**a, "url": attachment_url_for(a)} for a in items])
 
 
 @router.post("/meetings/{meeting_id}/attachments")
@@ -582,10 +574,7 @@ async def upload_attachment(meeting_id: str, request: Request):
         "url": f"/api/v1/attachments/{attachment_id}/content",
         "created_at": now_iso(),
     }
-    ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
-    path = ATTACHMENT_DIR / attachment_id
-    path.write_bytes(data)
-    db["attachment_files"][attachment_id] = str(path)
+    save_attachment(attachment_id, data, mime)
 
     db["attachments"].append(attachment)
     audit(
@@ -594,7 +583,7 @@ async def upload_attachment(meeting_id: str, request: Request):
         "meeting.attachment.upload",
         f"{meeting_id} · {file_name}",
     )
-    return ok(attachment, 201)
+    return ok({**attachment, "url": attachment_url_for(attachment)}, 201)
 
 
 @router.get("/attachments/{attachment_id}/content")

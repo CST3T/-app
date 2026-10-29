@@ -1,17 +1,66 @@
-"""附件与音频落盘（演示版存本地 storage/，生产环境替换为对象存储 MinIO/S3）。"""
+"""附件与音频存储：配置了 S3/MinIO 走对象存储（私有桶 + 预签名 URL），否则落本地 storage/。"""
 
 from __future__ import annotations
 
 import math
+import mimetypes
 import os
 import struct
 from pathlib import Path
 
+from . import objectstore
 from .store import db
 
 STORAGE_ROOT = Path(os.getenv("MINUTES_STORAGE_DIR", Path(__file__).resolve().parent.parent / "storage"))
 ATTACHMENT_DIR = STORAGE_ROOT / "attachments"
 AUDIO_DIR = STORAGE_ROOT / "audio"
+
+
+def s3_enabled() -> bool:
+    return objectstore.enabled()
+
+
+def _attachment_key(attachment_id: str) -> str:
+    return f"attachments/{attachment_id}"
+
+
+def save_attachment(attachment_id: str, data: bytes, mime_type: str) -> None:
+    if s3_enabled():
+        objectstore.put(_attachment_key(attachment_id), data, mime_type)
+        return
+    ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
+    path = ATTACHMENT_DIR / attachment_id
+    path.write_bytes(data)
+    db["attachment_files"][attachment_id] = str(path)
+
+
+def save_audio(meeting: dict, data: bytes) -> None:
+    """按会议已有的 audio_key 落对象；未配对象存储时写本地目录。"""
+    key = meeting["audio_key"]
+    ext = key.rsplit(".", 1)[-1] if "." in key else "m4a"
+    if s3_enabled():
+        mime = mimetypes.guess_type(f"audio.{ext}")[0] or "application/octet-stream"
+        objectstore.put(key, data, mime)
+        return
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    path = AUDIO_DIR / f"{meeting['id']}.{ext}"
+    path.write_bytes(data)
+    db["audio_files"][meeting["id"]] = str(path)
+
+
+def audio_url_for(meeting: dict) -> str | None:
+    """播放地址：对象存储启用且对象存在时返回 10 分钟签名 URL，否则沿用原值。"""
+    key = meeting.get("audio_key")
+    if s3_enabled() and key and objectstore.exists(key):
+        return objectstore.signed_url(key)
+    return meeting.get("audio_url")
+
+
+def attachment_url_for(meta: dict) -> str:
+    """资料下载地址：对象存在时返回签名 URL，种子占位资料仍走 API 路径。"""
+    if s3_enabled() and objectstore.exists(_attachment_key(meta["id"])):
+        return objectstore.signed_url(_attachment_key(meta["id"]))
+    return meta.get("url") or f"/api/v1/attachments/{meta['id']}/content"
 
 
 def delete_attachment_file(attachment_id: str) -> None:
@@ -21,10 +70,17 @@ def delete_attachment_file(attachment_id: str) -> None:
             Path(path).unlink(missing_ok=True)
         except OSError:
             pass
+    if s3_enabled():
+        objectstore.delete(_attachment_key(attachment_id))
 
 
 def attachment_bytes(meta: dict) -> tuple[bytes, str]:
     attachment_id = meta["id"]
+    if s3_enabled():
+        data = objectstore.read(_attachment_key(attachment_id))
+        if data is not None:
+            return data, meta["mime_type"]
+
     path = db["attachment_files"].get(attachment_id)
     if path and Path(path).exists():
         return Path(path).read_bytes(), meta["mime_type"]

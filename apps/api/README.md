@@ -67,7 +67,8 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 | `MINUTES_ENABLE_RESET` | `0` | 是否开放 `POST /dev/reset`，本地 E2E 需显式置 `1` |
 | `DATABASE_URL` | 空 | 配置后 `/ready` 会真实探测 PostgreSQL（本地内存模式留空） |
 | `REDIS_URL` | 空 | 配置后 `/ready` 探测 Redis |
-| `S3_ENDPOINT` | 空 | 配置后 `/ready` 探测对象存储；不配则检查本地存储目录可写 |
+| `S3_ENDPOINT` | 空 | 对象存储内部地址（如 `http://minio:9000`）；四项 `S3_*` 齐全才启用 |
+| `S3_PUBLIC_ENDPOINT` | 同 `S3_ENDPOINT` | 生成预签名 URL 用的对外地址（本地 `http://localhost:9000`） |
 
 ## 测试
 
@@ -87,13 +88,14 @@ $env:E2E_RESET_API='http://127.0.0.1:8000/api/v1/dev/reset'
 npx playwright test   # 真实后端 20/20 通过
 ```
 
-## 数据与平台（v0.2 数据负责人交付）
+## 数据与平台（v0.2 数据负责人交付，v1.2 增补对象存储）
 
 | 能力 | 位置 | 状态 |
 | --- | --- | --- |
 | 14 表模型 | `app/models.py` | 完成（与文档 1.4 对应） |
 | 迁移 | `alembic/versions/0001_init.py` | 完成；`alembic upgrade head --sql` 可离线校验 |
 | 种子入库 | `app/seed_db.py`（`python -m app.seed_db [--reset]`） | 完成，与 `build_seed()` 同源 |
+| 对象存储 | `app/objectstore.py`、`app/storage.py` | 完成：MinIO 私有桶 + 10 分钟预签名 URL；未配 S3 回退本地 |
 | 连接与就绪探测 | `app/db.py`、`GET /api/v1/ready` | 完成；未配置依赖时按「未启用」放行 |
 | 结构化日志 | `app/logging.py`（`MINUTES_LOG_FORMAT=json`） | 完成 |
 | 编排 | [infra/docker-compose.yml](../../infra/docker-compose.yml)、两个 Dockerfile、[Makefile](../../Makefile) | 完成，2026-10-29 实机跑通 |
