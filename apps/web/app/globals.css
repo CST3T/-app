@@ -1,0 +1,237 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI',
+      Roboto, 'Helvetica Neue', sans-serif;
+    --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+
+    /* 亮色主题：底色偏暖灰，主色为低饱和靛蓝 */
+    --background: 220 20% 97%;
+    --foreground: 224 24% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 24% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 24% 12%;
+
+    --surface: 220 18% 95%;
+    --surface-hover: 220 18% 91%;
+
+    --primary: 231 44% 48%;
+    --primary-foreground: 0 0% 100%;
+    --primary-soft: 231 44% 94%;
+
+    --secondary: 220 16% 92%;
+    --secondary-foreground: 224 20% 22%;
+
+    --muted: 220 16% 93%;
+    --muted-foreground: 222 12% 45%;
+
+    --accent: 172 42% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 58% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 16% 88%;
+    --input: 220 16% 86%;
+    --ring: 231 44% 48%;
+
+    --radius: 0.75rem;
+
+    /* 状态机语义色 */
+    --status-uploaded: 220 10% 55%;
+    --status-transcribing: 217 68% 52%;
+    --status-summarizing: 268 48% 56%;
+    --status-done: 158 48% 38%;
+    --status-failed: 0 58% 52%;
+
+    /* 优先级语义色 */
+    --priority-high: 0 58% 52%;
+    --priority-medium: 33 72% 46%;
+    --priority-low: 220 10% 52%;
+  }
+
+  .dark {
+    /* 深色主题：近黑深蓝底 + 青蓝霓虹，科技感暗调 */
+    --background: 228 30% 5%;
+    --foreground: 210 20% 94%;
+
+    --card: 228 26% 8%;
+    --card-foreground: 210 20% 94%;
+
+    --popover: 228 26% 10%;
+    --popover-foreground: 210 20% 94%;
+
+    --surface: 228 22% 11%;
+    --surface-hover: 228 20% 16%;
+
+    --primary: 190 92% 62%;
+    --primary-foreground: 228 40% 6%;
+    --primary-soft: 190 55% 17%;
+
+    --secondary: 228 18% 14%;
+    --secondary-foreground: 210 18% 90%;
+
+    --muted: 228 16% 15%;
+    --muted-foreground: 215 14% 62%;
+
+    --accent: 265 84% 70%;
+    --accent-foreground: 228 40% 8%;
+
+    --destructive: 352 78% 63%;
+    --destructive-foreground: 228 40% 8%;
+
+    --border: 220 18% 19%;
+    --input: 220 18% 23%;
+    --ring: 190 92% 62%;
+
+    /* 霓虹辉光基准色，统一供阴影与渐变使用 */
+    --glow: 190 92% 62%;
+
+    --status-uploaded: 214 12% 62%;
+    --status-transcribing: 199 92% 66%;
+    --status-summarizing: 268 72% 72%;
+    --status-done: 158 62% 55%;
+    --status-failed: 352 78% 66%;
+
+    --priority-high: 352 78% 66%;
+    --priority-medium: 36 88% 62%;
+    --priority-low: 214 12% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    /* 暗调科技感：极淡的青蓝光斑，层次来自光而非色块 */
+    background-image:
+      radial-gradient(1200px 620px at 6% -18%, hsl(var(--primary) / 0.16), transparent 62%),
+      radial-gradient(900px 520px at 102% -6%, hsl(var(--accent) / 0.14), transparent 58%),
+      radial-gradient(760px 420px at 50% 118%, hsl(var(--primary) / 0.08), transparent 62%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.3);
+  }
+
+  /* 输入类控件的聚焦统一为霓虹光晕 */
+  :focus-visible {
+    outline: none;
+  }
+}
+
+@layer components {
+  /* 玻璃拟态卡片：卡片化设计的主要载体 */
+  .panel {
+    @apply relative rounded-xl border border-border/70 bg-card/70 backdrop-blur-md;
+    box-shadow:
+      inset 0 1px 0 hsl(var(--foreground) / 0.04),
+      0 30px 70px -50px hsl(var(--primary) / 0.65);
+  }
+
+  .panel-hover {
+    @apply transition-colors duration-200 hover:border-border hover:bg-surface-hover/60;
+  }
+
+  /* 科技网格：仅作背景装饰，不拦截鼠标 */
+  .tech-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.5) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 0%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000 0%, transparent 78%);
+    pointer-events: none;
+  }
+
+  /* 霓虹渐隐分隔线 */
+  .hairline-glow {
+    background-image: linear-gradient(
+      to right,
+      transparent,
+      hsl(var(--primary) / 0.45),
+      hsl(var(--accent) / 0.35),
+      transparent
+    );
+  }
+
+  .text-glow {
+    text-shadow: 0 0 22px hsl(var(--primary) / 0.45);
+  }
+
+  /* 骨架屏 */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-muted;
+  }
+
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-foreground/10 to-transparent;
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* 自定义滚动条 */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 999px;
+  }
+
+  .scroll-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+/* 登录页光晕缓慢漂浮，只在装饰层使用 */
+@keyframes float-orb {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -22px, 0) scale(1.06);
+  }
+}
+
+.animate-float-orb {
+  animation: float-orb 9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

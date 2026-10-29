@@ -1,0 +1,11 @@
+# Docker 构建上下文忽略清单（同时用于 api / web 两个镜像）
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/node_modules
+**/.next
+**/test-results
+**/playwright-report
+**/storage
+**/.env*
+!**/.env.example

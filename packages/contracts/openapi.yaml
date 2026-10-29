@@ -1,0 +1,917 @@
+openapi: 3.1.0
+info:
+  title: 会记 Minutes API
+  version: 0.1.0
+  description: |
+    AI 会议纪要服务契约（v0.1 冻结）。
+    前端依据本文件 + Prism/MSW mock 开发，不等后端。
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 本地
+  - url: /api/v1
+    description: 同源 / mock
+
+tags:
+  - name: auth
+  - name: workspaces
+  - name: meetings
+  - name: action-items
+  - name: comments
+  - name: search
+  - name: shares
+  - name: audit
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: 注册
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string, minLength: 1 }
+      responses:
+        '201': { $ref: '#/components/responses/AuthOk' }
+        '400': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: 登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/AuthOk' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: 刷新并旋转 refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/AuthOk' }
+        '401': { $ref: '#/components/responses/Error' }
+  /me:
+    get:
+      tags: [auth]
+      summary: 当前用户 + 工作区列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          user: { $ref: '#/components/schemas/User' }
+                          workspaces:
+                            type: array
+                            items: { $ref: '#/components/schemas/Workspace' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /workspaces:
+    get:
+      tags: [workspaces]
+      summary: 我参与的工作区
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [workspaces]
+      summary: 创建工作区（创建者为 Owner）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /workspaces/{wid}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [workspaces]
+      summary: 工作区详情与统计
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [workspaces]
+      summary: 改名称/计划（Admin+）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Error' }
+  /workspaces/{wid}/members:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [workspaces]
+      summary: 成员与角色（Member+）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [workspaces]
+      summary: 添加成员（Admin+，按姓名 + 手机号，邮箱选填）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, phone]
+              properties:
+                name: { type: string }
+                phone: { type: string, description: 11 位手机号 }
+                email: { type: string, nullable: true }
+                role: { $ref: '#/components/schemas/Role' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /workspaces/{wid}/member-directory:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [workspaces]
+      summary: 人员库（Admin+，供添加成员时调用，含姓名、手机号、是否已在工作区）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '403': { $ref: '#/components/responses/Error' }
+  /workspaces/{wid}/members/{uid}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - name: uid
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [workspaces]
+      summary: 改角色（Admin+，不能改 Owner）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [workspaces]
+      summary: 移除成员（Admin+）
+      responses:
+        '204': { description: 已移除 }
+
+  /workspaces/{wid}/meetings:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [meetings]
+      summary: 会议列表
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/MeetingStatus' }
+        - name: q
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [meetings]
+      summary: 创建会议（可 multipart 带音频）
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [title, started_at, language]
+              properties:
+                title: { type: string }
+                started_at: { type: string, format: date-time }
+                language: { type: string, example: zh }
+                audio: { type: string, format: binary }
+      responses:
+        '202':
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - properties:
+                      data: { $ref: '#/components/schemas/ProcessResponse' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /meetings/{id}:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [meetings]
+      summary: 聚合详情（会议 + 摘要 + 待办 + 权限）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [meetings]
+      summary: 改标题/开始时间/语言
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [meetings]
+      summary: 软删除（Admin+）
+      responses:
+        '204': { description: 已删除 }
+  /meetings/{id}/audio:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    post:
+      tags: [meetings]
+      summary: 上传/替换音频
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio: { type: string, format: binary }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+  /meetings/{id}/process:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    post:
+      tags: [meetings]
+      summary: 触发处理
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+  /meetings/{id}/retry:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    post:
+      tags: [meetings]
+      summary: 失败重试（可从指定阶段恢复）
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from_stage:
+                  type: string
+                  enum: [transcribing, summarizing]
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+  /meetings/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [meetings]
+      summary: SSE 进度流（status/progress/error/done）
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /meetings/{id}/transcript:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [meetings]
+      summary: 转写分段（按 seq）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /meetings/{id}/summary:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [meetings]
+      summary: 最新摘要 + 版本历史
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '422': { $ref: '#/components/responses/Error' }
+  /meetings/{id}/summary/regenerate:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    post:
+      tags: [meetings]
+      summary: 重新生成摘要（创建新版本）
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /meetings/{id}/action-items:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [action-items]
+      summary: 待办列表
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [action-items]
+      summary: 手动新增待办
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /action-items/{item_id}:
+    parameters:
+      - name: item_id
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [action-items]
+      summary: 改标题/负责人/截止/状态
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    delete:
+      tags: [action-items]
+      summary: 删除待办
+      responses:
+        '204': { description: 已删除 }
+
+  /meetings/{id}/participants:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [participants]
+      summary: 参会成员列表（含每人的会议身份）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [participants]
+      summary: 添加参会成员并设置会议身份（重复添加视为更新身份）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string }
+                meeting_role:
+                  $ref: '#/components/schemas/MeetingRole'
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+  /meetings/{id}/participants/{uid}:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+      - name: uid
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [participants]
+      summary: 修改成员的会议身份（一场会议只保留一位主持人）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [participants]
+      summary: 移除参会成员（创建者不可移除）
+      responses:
+        '204': { description: 已移除 }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /meetings/{id}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [attachments]
+      summary: 会议资料列表（Viewer+）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [attachments]
+      summary: 共享资料（multipart：file），单文件 ≤ 50MB
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+  /attachments/{aid}:
+    parameters:
+      - name: aid
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [attachments]
+      summary: 删除资料（上传者本人 / Admin+）
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+  /attachments/{aid}/content:
+    parameters:
+      - name: aid
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [attachments]
+      summary: 资料内容（生产环境为对象存储签名 URL 重定向，Mock 直出字节）
+      responses:
+        '200':
+          description: 二进制内容
+          content:
+            application/octet-stream: {}
+
+  /meetings/{id}/comments:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [comments]
+      summary: 评论列表（Viewer+）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [comments]
+      summary: 发表评论
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /comments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [comments]
+      summary: 删除评论（作者/Admin+）
+      responses:
+        '204': { description: 已删除 }
+
+  /workspaces/{wid}/search:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [search]
+      summary: 关键词 + 语义混合搜索
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: mode
+          in: query
+          schema: { type: string, enum: [keyword, semantic, hybrid], default: hybrid }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /meetings/{id}/share-links:
+    parameters:
+      - $ref: '#/components/parameters/MeetingId'
+    get:
+      tags: [shares]
+      summary: 分享链接列表与状态
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [shares]
+      summary: 创建只读分享链接
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /share-links/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [shares]
+      summary: 撤销分享（Admin+）
+      responses:
+        '204': { description: 已撤销 }
+  /public/shares/{token}:
+    get:
+      tags: [shares]
+      summary: 公开只读访问（校验 scope / expires_at）
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '404': { $ref: '#/components/responses/Error' }
+        '410': { description: 链接已过期或撤销, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /workspaces/{wid}/audit-logs:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [audit]
+      summary: 审计日志（Admin+）
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+
+  /workspaces/{wid}/todos:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      tags: [action-items]
+      summary: 工作区待办聚合（跨会议、按负责人分组，含逾期与提醒状态）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkspaceTodosResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /workspaces/{wid}/todos/{todo_id}/remind:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - name: todo_id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [action-items]
+      summary: 向已逾期待办的负责人发送提醒消息（Member+）
+      responses:
+        '200':
+          description: 提醒已发送
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TodoReminderResult' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /health:
+    get:
+      tags: [audit]
+      summary: 健康检查
+      security: []
+      responses:
+        '200': { description: OK }
+
+components:
+  parameters:
+    WorkspaceId:
+      name: wid
+      in: path
+      required: true
+      schema: { type: string }
+    MeetingId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, nullable: true }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+
+  responses:
+    Success:
+      description: 成功
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Success' }
+    Error:
+      description: 失败
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    AuthOk:
+      description: 认证成功
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Success'
+              - properties:
+                  data: { $ref: '#/components/schemas/AuthTokens' }
+
+  schemas:
+    Success:
+      type: object
+      required: [data, request_id]
+      properties:
+        data: {}
+        request_id: { type: string, example: req_01J001 }
+    Error:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            message: { type: string }
+            details: { type: object, nullable: true }
+        request_id: { type: string }
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - STATE_CONFLICT
+        - SUMMARY_SCHEMA_INVALID
+        - RATE_LIMITED
+        - INTERNAL_ERROR
+    MeetingStatus:
+      type: string
+      enum: [uploaded, transcribing, summarizing, done, failed]
+    Priority:
+      type: string
+      enum: [high, medium, low]
+    ActionStatus:
+      type: string
+      enum: [todo, in_progress, done]
+    Role:
+      type: string
+      enum: [owner, admin, member, viewer]
+    User:
+      type: object
+      required: [id, email, name]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        phone: { type: string, nullable: true }
+        avatar_url: { type: string, nullable: true }
+    MemberCandidate:
+      type: object
+      required: [user_id, name, phone, email, in_workspace]
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        avatar_url: { type: string, nullable: true }
+        in_workspace: { type: boolean }
+    Workspace:
+      type: object
+      required: [id, name, owner_id, plan, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        owner_id: { type: string }
+        plan: { type: string, enum: [free, team] }
+        role: { $ref: '#/components/schemas/Role' }
+    AuthTokens:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, enum: [bearer] }
+        expires_in: { type: integer }
+    ProcessResponse:
+      type: object
+      required: [meeting_id, status, progress, job_id]
+      properties:
+        meeting_id: { type: string }
+        status: { $ref: '#/components/schemas/MeetingStatus' }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        job_id: { type: string }
+    Meeting:
+      type: object
+      required: [id, workspace_id, title, status, progress]
+      properties:
+        id: { type: string }
+        workspace_id: { type: string }
+        created_by: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/MeetingStatus' }
+        progress: { type: integer }
+        audio_key: { type: string, nullable: true }
+        audio_url: { type: string, nullable: true, description: 10 分钟签名 URL }
+        audio_bytes: { type: integer, nullable: true }
+        duration_sec: { type: integer, nullable: true }
+        language: { type: string }
+        started_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        deleted_at: { type: string, nullable: true }
+    MeetingRole:
+      type: string
+      description: 会议内的职责身份，与工作区 Role 相互独立
+      enum: [host, recorder, participant, observer]
+    MeetingParticipant:
+      type: object
+      required: [user_id, name, email, meeting_role, is_creator, joined_at]
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        avatar_url: { type: string, nullable: true }
+        meeting_role: { $ref: '#/components/schemas/MeetingRole' }
+        is_creator: { type: boolean, description: 创建者固定为主持人且不可移除 }
+        joined_at: { type: string, format: date-time }
+    AttachmentKind:
+      type: string
+      enum: [image, audio, video, doc, other]
+    MeetingAttachment:
+      type: object
+      required: [id, meeting_id, uploader_id, uploader_name, file_name, mime_type, size_bytes, kind, created_at]
+      properties:
+        id: { type: string }
+        meeting_id: { type: string }
+        uploader_id: { type: string }
+        uploader_name: { type: string }
+        file_name: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        kind: { $ref: '#/components/schemas/AttachmentKind' }
+        url: { type: string, nullable: true, description: 内容地址（生产为签名 URL） }
+        created_at: { type: string, format: date-time }
+    MeetingPermissions:
+      type: object
+      properties:
+        can_edit: { type: boolean }
+        can_delete: { type: boolean }
+        can_process: { type: boolean }
+        can_comment: { type: boolean }
+        can_share: { type: boolean }
+        can_manage_participants: { type: boolean }
+        can_manage_attachments: { type: boolean }
+    MeetingDetail:
+      type: object
+      description: GET /meetings/{id} 的聚合返回
+      required: [meeting, participants, attachments, permissions, counts]
+      properties:
+        meeting: { $ref: '#/components/schemas/Meeting' }
+        summary: { $ref: '#/components/schemas/Summary' }
+        action_items:
+          type: array
+          items: { $ref: '#/components/schemas/ActionItem' }
+        participants:
+          type: array
+          items: { $ref: '#/components/schemas/MeetingParticipant' }
+        attachments:
+          type: array
+          items: { $ref: '#/components/schemas/MeetingAttachment' }
+        permissions: { $ref: '#/components/schemas/MeetingPermissions' }
+        counts:
+          type: object
+          properties:
+            segments: { type: integer }
+            action_items: { type: integer }
+            comments: { type: integer }
+            attachments: { type: integer }
+    TranscriptSegment:
+      type: object
+      required: [id, meeting_id, seq, start_ms, end_ms, content]
+      properties:
+        id: { type: string }
+        meeting_id: { type: string }
+        seq: { type: integer }
+        start_ms: { type: integer }
+        end_ms: { type: integer }
+        speaker: { type: string, nullable: true, description: 说话人分离预留，可为空 }
+        content: { type: string }
+    SummaryContent:
+      type: object
+      properties:
+        topics: { type: array, items: { type: string } }
+        key_points: { type: array, items: { type: string } }
+        decisions: { type: array, items: { type: string } }
+        risks: { type: array, items: { type: string } }
+        action_items:
+          type: array
+          items:
+            type: object
+            properties:
+              title: { type: string }
+              owner: { type: string, nullable: true }
+              due_date: { type: string, nullable: true }
+    Summary:
+      type: object
+      required: [id, meeting_id, version, content, status]
+      properties:
+        id: { type: string }
+        meeting_id: { type: string }
+        model: { type: string }
+        version: { type: integer }
+        content: { $ref: '#/components/schemas/SummaryContent' }
+        status: { type: string, enum: [ok, schema_invalid, degraded] }
+        created_at: { type: string, format: date-time }
+    ActionItem:
+      type: object
+      required: [id, meeting_id, title, status, priority]
+      properties:
+        id: { type: string }
+        meeting_id: { type: string }
+        owner_id: { type: string, nullable: true }
+        owner_name: { type: string, nullable: true }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/ActionStatus' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        due_date: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WorkspaceTodo:
+      type: object
+      required: [id, meeting_id, meeting_title, meeting_started_at, title, status, priority, is_overdue, overdue_days]
+      properties:
+        id: { type: string }
+        meeting_id: { type: string }
+        meeting_title: { type: string }
+        meeting_started_at: { type: string, format: date-time }
+        owner_id: { type: string, nullable: true }
+        owner_name: { type: string, nullable: true }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/ActionStatus' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        due_date: { type: string, nullable: true }
+        is_overdue: { type: boolean }
+        overdue_days: { type: integer, minimum: 0 }
+        reminder_sent_at: { type: string, nullable: true, format: date-time }
+    WorkspaceTodoGroup:
+      type: object
+      properties:
+        owner_id: { type: string, nullable: true }
+        owner_name: { type: string, nullable: true }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/WorkspaceTodo' }
+    WorkspaceTodosResponse:
+      type: object
+      required: [groups, summary, permissions, generated_at]
+      properties:
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/WorkspaceTodoGroup' }
+        summary:
+          type: object
+          properties:
+            total: { type: integer }
+            open: { type: integer }
+            overdue: { type: integer }
+            overdue_people: { type: integer }
+            reminded: { type: integer }
+        permissions:
+          type: object
+          properties:
+            can_update: { type: boolean }
+            can_remind: { type: boolean }
+        generated_at: { type: string, format: date-time }
+    TodoReminderResult:
+      type: object
+      required: [todo_id, reminded_at, message]
+      properties:
+        todo_id: { type: string }
+        owner_id: { type: string, nullable: true }
+        owner_name: { type: string, nullable: true }
+        reminded_at: { type: string, format: date-time }
+        message: { type: string }

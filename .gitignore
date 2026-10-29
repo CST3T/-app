@@ -1,0 +1,54 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# next.js
+.next
+out
+build
+next-env.d.ts
+
+# testing
+coverage
+playwright-report
+test-results
+.blob-report
+
+# misc
+.DS_Store
+*.pem
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env*.local
+
+# editor
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+npm-debug.log*
+yarn-error.log*
+
+# python / api
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv
+.venv/
+apps/api/storage/
+apps/api/.coverage
+infra/schema.sql
+
+# platform
+backups/
+
+# delivery artifacts (48 MB 离线演示包，不入库)
+演示包/
+会议纪要-前端演示.zip
+.screenshots/
+
