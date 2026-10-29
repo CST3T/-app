@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 
@@ -17,7 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import http
+from . import http, pipeline, repository
 from .errors import ApiError
 from .logging import access_logger, configure_logging, elapsed_ms
 from .pipeline import reset as reset_pipeline
@@ -58,6 +59,9 @@ async def attach_request_id(request: Request, call_next):
     started = time.perf_counter()
     response = await call_next(request)
     response.headers["X-Request-Id"] = request_id
+    # 写穿：变更请求成功后标记脏，由后台任务把内存快照落库
+    if request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400:
+        repository.mark_dirty()
     if not request.url.path.startswith(("/api/v1/dev",)):
         access_logger().info(
             "%s %s -> %s",
@@ -96,6 +100,33 @@ async def handle_unexpected_error(_request: Request, exc: Exception):
     return http.error_response(500, "INTERNAL_ERROR", "服务异常，请稍后重试")
 
 
+async def _flush_loop() -> None:
+    """每 0.4s 检查脏标记并落库，避免每个写请求同步等一次全量写。"""
+    while True:
+        await asyncio.sleep(0.4)
+        if repository.pending():
+            await asyncio.to_thread(repository.flush)
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    """选择存储后端：PostgreSQL 可用则水合/写种子，否则保持纯内存。"""
+    mode = repository.init()
+    app.state.store_mode = mode
+    if mode == "postgres":
+        # 重启前处于处理中的会议继续跑完，避免状态永久卡在 transcribing
+        pipeline.resume_incomplete()
+        app.state.flush_task = asyncio.create_task(_flush_loop())
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    task = getattr(app.state, "flush_task", None)
+    if task is not None:
+        task.cancel()
+    repository.flush(force=True)
+
+
 API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(workspaces.router, prefix=API_PREFIX)
@@ -114,6 +145,8 @@ async def dev_reset():
     db.clear()
     db.update(build_seed())
     reset_pipeline()
+    if repository.mode() == "postgres":
+        await asyncio.to_thread(repository.flush, True)
     return http.ok({"status": "reset"})
 
 
@@ -146,9 +179,12 @@ async def ready():
     checks["storage"] = {"configured": True, "ok": ok, "detail": detail}
 
     all_ok = all(item["ok"] for item in checks.values())
+    payload = {"store": repository.mode(), "checks": checks}
     if all_ok:
-        return http.ok({"status": "ready", "checks": checks})
-    return http.error_response(503, "DEPENDENCY_UNAVAILABLE", "依赖未就绪", {"checks": checks})
+        return http.ok({"status": "ready", **payload})
+    return http.error_response(
+        503, "DEPENDENCY_UNAVAILABLE", "依赖未就绪", payload
+    )
 
 
 @app.get("/health")

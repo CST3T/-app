@@ -4,7 +4,7 @@
 
 - 契约：[packages/contracts/openapi.yaml](../../packages/contracts/openapi.yaml)
 - 行为基准：[apps/web/mocks/handlers.ts](../web/mocks/handlers.ts)（接口、错误码、SSE、上传解析）
-- 部署形态：FastAPI + 进程内存储 + 本地文件存储（演示版，重启恢复种子数据）
+- 部署形态：FastAPI + PostgreSQL 写穿（未配库回退进程内存储）+ MinIO 对象存储（未配回退本地目录）
 
 ## 启动
 
@@ -52,7 +52,7 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 
 - 处理流水线：转写 9s（2%→70%）、摘要 6s（70%→100%）；标题包含「失败/超时/fail」会在摘要阶段模拟失败，用于演示断点重试。
 - 种子数据与前端 Mock 完全一致：3 场会议、12 条待办（含 3 条逾期）、4 份资料、分享链接、审计日志等。
-- 数据存内存，文件落盘 `apps/api/storage/`（已 gitignore）。
+- 配置 `DATABASE_URL` 时数据写穿 PostgreSQL（启动水合、变更 0.4s 内落库、退出前强制落库）；未配置则存内存，重启恢复种子。文件落 `apps/api/storage/`（已 gitignore）或 MinIO。
 
 ## 环境变量
 
@@ -65,7 +65,8 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 | `MINUTES_PIPELINE_SCALE` | `1` | 流水线倍速，测试可调大（如 `60`） |
 | `MINUTES_LOG_FORMAT` | `text` | 日志格式：`text` / `json` |
 | `MINUTES_ENABLE_RESET` | `0` | 是否开放 `POST /dev/reset`，本地 E2E 需显式置 `1` |
-| `DATABASE_URL` | 空 | 配置后 `/ready` 会真实探测 PostgreSQL（本地内存模式留空） |
+| `DATABASE_URL` | 空 | 配置后业务读写写穿 PostgreSQL（启动水合 / 变更落库），`/ready` 真实探测 | 
+| `MINUTES_STORE_BACKEND` | `postgres` | 配了 `DATABASE_URL` 时的后端选择；`memory` 强制纯内存（pytest 固定此值） |
 | `REDIS_URL` | 空 | 配置后 `/ready` 探测 Redis |
 | `S3_ENDPOINT` | 空 | 对象存储内部地址（如 `http://minio:9000`）；四项 `S3_*` 齐全才启用 |
 | `S3_PUBLIC_ENDPOINT` | 同 `S3_ENDPOINT` | 生成预签名 URL 用的对外地址（本地 `http://localhost:9000`） |
@@ -96,6 +97,7 @@ npx playwright test   # 真实后端 20/20 通过
 | 迁移 | `alembic/versions/0001_init.py` | 完成；`alembic upgrade head --sql` 可离线校验 |
 | 种子入库 | `app/seed_db.py`（`python -m app.seed_db [--reset]`） | 完成，与 `build_seed()` 同源 |
 | 对象存储 | `app/objectstore.py`、`app/storage.py` | 完成：MinIO 私有桶 + 10 分钟预签名 URL；未配 S3 回退本地 |
+| 业务持久化 | `app/repository.py`（写穿） | 完成：启动水合 / 变更落库 / 退出强刷 / 库不可用降级内存；重启不丢数据 |
 | 连接与就绪探测 | `app/db.py`、`GET /api/v1/ready` | 完成；未配置依赖时按「未启用」放行 |
 | 结构化日志 | `app/logging.py`（`MINUTES_LOG_FORMAT=json`） | 完成 |
 | 编排 | [infra/docker-compose.yml](../../infra/docker-compose.yml)、两个 Dockerfile、[Makefile](../../Makefile) | 完成，2026-10-29 实机跑通 |
@@ -126,9 +128,9 @@ cd apps/api
 .\.venv\Scripts\python.exe -m alembic upgrade head --sql
 ```
 
-> 当前业务读写仍走 `store.py` 内存结构；上表是生产化的数据底座，接入时按 Repository 层替换，接口与前端不变。
+> 业务读写已通过 `app/repository.py` 写穿 PostgreSQL（未配库自动回退内存），接口与前端零改动。
 
 ## 与生产形态的差距
 
-演示版刻意收敛了基础设施：进程内存储、进程内 asyncio 流水线、单进程 SSE。生产化路径见
-[项目开发文档.md](../../项目开发文档.md)：PostgreSQL（14 张表）、Redis 队列 + Worker、MinIO 对象存储、多副本 SSE。接口层与前端契约不变，替换存储与队列即可。
+演示版刻意收敛了基础设施：进程内 asyncio 流水线、单进程 SSE。数据已切 PostgreSQL（14 张表）、文件已切 MinIO；
+剩余生产化路径见 [项目开发文档.md](../../项目开发文档.md)：Redis 队列 + 独立 Worker、多副本 SSE。接口层与前端契约不变。

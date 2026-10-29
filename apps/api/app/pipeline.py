@@ -17,6 +17,7 @@ import re
 import time
 from collections import defaultdict
 
+from . import repository
 from .store import db, find_meeting, now_iso
 
 SCALE = float(os.getenv("MINUTES_PIPELINE_SCALE", "1") or "1")
@@ -84,10 +85,20 @@ def enqueue_job(meeting_id: str, from_stage: str = "transcribing") -> str | None
     meeting["progress"] = 2 if from_stage == "transcribing" else 70
     meeting["error"] = None
     meeting["updated_at"] = now_iso()
+    repository.mark_dirty()
 
     _ensure_task()
     _tick(time.monotonic())
     return _job_id(meeting_id)
+
+
+def resume_incomplete() -> None:
+    """进程重启后，把仍处于处理中的会议重新入队，避免状态永远卡住。"""
+    for meeting in list(db["meetings"]):
+        if meeting.get("deleted_at"):
+            continue
+        if meeting["status"] in ("transcribing", "summarizing"):
+            enqueue_job(meeting["id"], meeting["status"])
 
 
 def retry_job(meeting_id: str, from_stage: str | None = None) -> str | None:
@@ -135,6 +146,7 @@ def _tick(now: float) -> None:
                         "retryable": True,
                     }
                     meeting["updated_at"] = now_iso()
+                    repository.mark_dirty()
                     _jobs.pop(meeting_id, None)
                     emit(
                         meeting_id,
@@ -151,7 +163,9 @@ def _tick(now: float) -> None:
 
                 meeting["status"] = "summarizing"
                 meeting["progress"] = 70
+                meeting["updated_at"] = now_iso()
                 job["started_at"] = now
+                repository.mark_dirty()
                 emit(meeting_id, "status", {"status": "summarizing", "progress": 70})
             continue
 
@@ -167,6 +181,7 @@ def _tick(now: float) -> None:
                 meeting["progress"] = 100
                 meeting["error"] = None
                 meeting["updated_at"] = now_iso()
+                repository.mark_dirty()
                 _jobs.pop(meeting_id, None)
                 emit(meeting_id, "done", {"status": "done", "meeting_id": meeting_id})
 
@@ -270,6 +285,8 @@ def sse_frame(event: str, payload: dict) -> str:
 __all__ = [
     "emit",
     "enqueue_job",
+    "reset",
+    "resume_incomplete",
     "retry_job",
     "subscribe",
     "unsubscribe",

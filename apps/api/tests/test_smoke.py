@@ -12,6 +12,8 @@ import time
 
 os.environ.setdefault("MINUTES_STORAGE_DIR", tempfile.mkdtemp(prefix="minutes-test-"))
 os.environ.setdefault("MINUTES_PIPELINE_SCALE", "60")
+# 单测固定纯内存后端，避免本机恰好配了 DATABASE_URL 时把测试数据写进库
+os.environ.setdefault("MINUTES_STORE_BACKEND", "memory")
 # 单测不依赖真实密钥；生产由 MINUTES_JWT_SECRET 强制配置（见 test_security_hardening）
 os.environ.setdefault("MINUTES_ALLOW_INSECURE_JWT", "1")
 

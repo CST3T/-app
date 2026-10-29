@@ -50,7 +50,8 @@ def _date(value: str | None) -> date | None:
     return date.fromisoformat(value) if value else None
 
 
-def _clear(session: Session) -> None:
+def clear_all(session: Session) -> None:
+    """按外键顺序清空全部业务表（仓储落库与种子重置共用）。"""
     # 子表优先，避免外键冲突
     for model in (
         Embedding,
@@ -80,7 +81,7 @@ def seed_database(reset: bool = False) -> dict[str, int]:
         if existing and not reset:
             return {"skipped": 1}
         if reset:
-            _clear(session)
+            clear_all(session)
 
         session.add_all(
             User(

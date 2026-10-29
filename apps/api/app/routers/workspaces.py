@@ -245,6 +245,7 @@ async def remind_todo(wid: str, todo_id: str, request: Request):
 
     reminded_at = now_iso()
     db["todo_reminders"][item["id"]] = reminded_at
+    db.setdefault("todo_reminder_actors", {})[item["id"]] = user["id"]
     audit(wid, user, "todo.remind", f"{item['id']} · {item['owner_name']} · {item['title']}")
     return ok(
         {

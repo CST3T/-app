@@ -460,6 +460,7 @@ def build_seed() -> dict:
         "share_links": share_links,
         "audit_logs": audit_logs,
         "todo_reminders": {},
+        "todo_reminder_actors": {},
         "attachment_files": {},
         "audio_files": {},
     }
