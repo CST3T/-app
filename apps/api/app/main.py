@@ -19,12 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import http, pipeline, repository
+from . import queue as job_queue
 from .errors import ApiError
 from .logging import access_logger, configure_logging, elapsed_ms
 from .pipeline import reset as reset_pipeline
 from .routers import auth, collaboration, meetings, workspaces
 from .seed import build_seed
-from .store import db
+from .store import db, now_iso
 
 configure_logging()
 
@@ -108,13 +109,42 @@ async def _flush_loop() -> None:
             await asyncio.to_thread(repository.flush)
 
 
+def _on_worker_event(meeting_id: str, event: str | None, data: dict) -> None:
+    """Worker 经 Redis Pub/Sub 发来的进度：更新内存状态并转发给 SSE。
+
+    进度事件只同步 status/progress；终态事件再从库刷新转写、摘要与待办。
+    """
+    if not event:
+        return
+    meeting = next((m for m in db["meetings"] if m["id"] == meeting_id), None)
+    if meeting is not None and data.get("status"):
+        meeting["status"] = data["status"]
+        if data.get("progress") is not None:
+            meeting["progress"] = data["progress"]
+        if event == "error":
+            meeting["error"] = {
+                "code": data.get("code"),
+                "message": data.get("message"),
+                "stage": data.get("stage"),
+                "retryable": data.get("retryable", True),
+            }
+        meeting["updated_at"] = now_iso()
+
+    if event in ("done", "error"):
+        repository.refresh_meeting(meeting_id)
+
+    pipeline.emit(meeting_id, event, data)
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     """选择存储后端：PostgreSQL 可用则水合/写种子，否则保持纯内存。"""
     mode = repository.init()
     app.state.store_mode = mode
+    app.state.flush_task = None
     if mode == "postgres":
-        # 重启前处于处理中的会议继续跑完，避免状态永久卡在 transcribing
+        # 有 Redis 时订阅 Worker 的广播，并把中断的任务重新投递；否则留在本进程跑完
+        app.state.event_listener = job_queue.start_event_listener(_on_worker_event)
         pipeline.resume_incomplete()
         app.state.flush_task = asyncio.create_task(_flush_loop())
 
@@ -147,6 +177,9 @@ async def dev_reset():
     reset_pipeline()
     if repository.mode() == "postgres":
         await asyncio.to_thread(repository.flush, True)
+    # 清掉队列里的旧任务并换代号，避免 Worker 把重置前的会议又写回库
+    job_queue.purge()
+    job_queue.bump_generation()
     return http.ok({"status": "reset"})
 
 

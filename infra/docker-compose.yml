@@ -67,7 +67,7 @@ services:
     build:
       context: ../apps/api
       dockerfile: Dockerfile
-    environment:
+    environment: &api-env
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://minutes:minutes@postgres:5432/minutes}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -98,6 +98,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  # 独立 Worker：消费 Redis 队列，跑转写/摘要并把进度广播回 API（复用 api 镜像）
+  worker:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.worker"]
+    environment: *api-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
   web:
     build:

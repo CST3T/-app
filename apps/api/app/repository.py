@@ -677,3 +677,110 @@ def load_all() -> bool:
     store.db.clear()
     store.db.update(data)
     return True
+
+
+def refresh_meeting(meeting_id: str) -> bool:
+    """从库刷新单场会议的状态、转写、摘要与待办。
+
+    Worker 是独立进程，它写完数据库后 API 的内存快照还是旧的；收到终态事件时
+    用本函数把这一场会议替换成库里的最新版本，避免详情页读到过期数据。
+    """
+    if _mode != "postgres":
+        return False
+
+    try:
+        with Session(get_engine()) as session:
+            row = session.get(Meeting, meeting_id)
+            if row is None:
+                return False
+            segments = list(
+                session.scalars(
+                    select(TranscriptSegment)
+                    .where(TranscriptSegment.meeting_id == meeting_id)
+                    .order_by(TranscriptSegment.seq)
+                )
+            )
+            summaries = list(
+                session.scalars(
+                    select(Summary)
+                    .where(Summary.meeting_id == meeting_id)
+                    .order_by(Summary.version)
+                )
+            )
+            items = list(
+                session.scalars(
+                    select(ActionItem)
+                    .where(ActionItem.meeting_id == meeting_id)
+                    .order_by(ActionItem.created_at)
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("刷新会议 %s 失败：%s", meeting_id, exc)
+        return False
+
+    meeting = next((m for m in store.db["meetings"] if m["id"] == meeting_id), None)
+    if meeting is None:
+        return False
+
+    meeting.update(
+        {
+            "status": row.status,
+            "progress": row.progress,
+            "duration_sec": row.duration_sec,
+            "audio_key": row.audio_key,
+            "audio_bytes": row.audio_bytes,
+            "updated_at": _iso(row.updated_at),
+            "deleted_at": _iso(row.deleted_at),
+            "error": row.error,
+        }
+    )
+
+    store.db["transcript_segments"] = [
+        s for s in store.db["transcript_segments"] if s["meeting_id"] != meeting_id
+    ] + [
+        {
+            "id": s.id,
+            "meeting_id": s.meeting_id,
+            "seq": s.seq,
+            "start_ms": s.start_ms,
+            "end_ms": s.end_ms,
+            "speaker": s.speaker,
+            "content": s.content,
+        }
+        for s in segments
+    ]
+
+    store.db["summaries"] = [
+        s for s in store.db["summaries"] if s["meeting_id"] != meeting_id
+    ] + [
+        {
+            "id": s.id,
+            "meeting_id": s.meeting_id,
+            "model": s.model,
+            "version": s.version,
+            "status": s.status,
+            "content": s.content,
+            "created_at": _iso(s.created_at),
+        }
+        for s in summaries
+    ]
+
+    users = {u["id"]: u for u in store.db["users"]}
+    store.db["action_items"] = [
+        a for a in store.db["action_items"] if a["meeting_id"] != meeting_id
+    ] + [
+        {
+            "id": a.id,
+            "meeting_id": a.meeting_id,
+            "owner_id": a.owner_id,
+            "owner_name": users[a.owner_id]["name"] if a.owner_id in users else None,
+            "title": a.title,
+            "status": a.status,
+            "priority": a.priority,
+            "due_date": a.due_date.isoformat() if a.due_date else None,
+            "created_at": _iso(a.created_at),
+            "updated_at": _iso(a.updated_at),
+        }
+        for a in items
+    ]
+    return True

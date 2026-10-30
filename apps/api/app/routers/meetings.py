@@ -17,6 +17,7 @@ from ..api_utils import (
 from ..errors import ApiError, forbidden, not_found, validation
 from ..http import empty, ok
 from ..pipeline import enqueue_job, retry_job, sse_frame, subscribe, unsubscribe
+from .. import repository
 from ..store import (
     attachment_kind_of,
     audit,
@@ -233,6 +234,9 @@ async def create_meeting(wid: str, request: Request):
 @router.get("/meetings/{meeting_id}")
 async def get_meeting(meeting_id: str, request: Request):
     meeting, _user, role = guard_meeting(request, meeting_id)
+    # 处理中的会议由 Worker 推进，读前先按库刷新，避免看到滞后的状态/进度
+    if repository.mode() == "postgres" and meeting["status"] in ("transcribing", "summarizing"):
+        await asyncio.to_thread(repository.refresh_meeting, meeting["id"])
     detail = build_meeting_detail(meeting, role)
     detail["audio_url"] = audio_url_for(meeting)
     return ok(detail)
@@ -344,19 +348,62 @@ async def meeting_events(meeting_id: str, request: Request):
     async def stream():
         queue: asyncio.Queue = asyncio.Queue()
         subscribe(meeting_id, queue)
+        last_status = meeting["status"]
+        last_progress = meeting["progress"]
         try:
+            if repository.mode() == "postgres" and last_status in ("transcribing", "summarizing"):
+                await asyncio.to_thread(repository.refresh_meeting, meeting_id)
+                last_status = meeting["status"]
+                last_progress = meeting["progress"]
             yield sse_frame(
                 "status",
-                {"status": meeting["status"], "progress": meeting["progress"]},
+                {"status": last_status, "progress": last_progress},
             )
             while True:
                 if await request.is_disconnected():
                     break
                 try:
-                    event, data = await asyncio.wait_for(queue.get(), timeout=15)
+                    event, data = await asyncio.wait_for(queue.get(), timeout=5)
                 except asyncio.TimeoutError:
+                    # 兜底：Pub/Sub 偶发丢事件时，按库对齐一次，保证前端最终能看到终态
+                    if repository.mode() == "postgres" and last_status in (
+                        "transcribing",
+                        "summarizing",
+                    ):
+                        await asyncio.to_thread(repository.refresh_meeting, meeting_id)
+                    if meeting["status"] != last_status:
+                        last_status = meeting["status"]
+                        last_progress = meeting["progress"]
+                        if last_status == "done":
+                            yield sse_frame("done", {"status": "done", "meeting_id": meeting_id})
+                            continue
+                        if last_status == "failed":
+                            error = meeting.get("error") or {}
+                            yield sse_frame(
+                                "error",
+                                {
+                                    "status": "failed",
+                                    "code": error.get("code"),
+                                    "message": error.get("message"),
+                                    "stage": error.get("stage"),
+                                    "retryable": error.get("retryable", True),
+                                },
+                            )
+                            continue
+                        yield sse_frame(
+                            "status", {"status": last_status, "progress": last_progress}
+                        )
+                        continue
+                    if meeting["progress"] != last_progress:
+                        last_progress = meeting["progress"]
+                        yield sse_frame(
+                            "progress", {"status": last_status, "progress": last_progress}
+                        )
+                        continue
                     yield sse_frame("ping", {"ts": now_iso()})
                     continue
+                last_status = data.get("status", last_status)
+                last_progress = data.get("progress", last_progress)
                 yield sse_frame(event, data)
         finally:
             unsubscribe(meeting_id, queue)

@@ -4,7 +4,7 @@
 
 - 契约：[packages/contracts/openapi.yaml](../../packages/contracts/openapi.yaml)
 - 行为基准：[apps/web/mocks/handlers.ts](../web/mocks/handlers.ts)（接口、错误码、SSE、上传解析）
-- 部署形态：FastAPI + PostgreSQL 写穿（未配库回退进程内存储）+ MinIO 对象存储（未配回退本地目录）
+- 部署形态：FastAPI + PostgreSQL 写穿（未配库回退进程内存储）+ MinIO 对象存储（未配回退本地目录）+ Redis 队列与独立 Worker（未配 Redis 回退进程内流水线）
 
 ## 启动
 
@@ -53,6 +53,7 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 - 处理流水线：转写 9s（2%→70%）、摘要 6s（70%→100%）；标题包含「失败/超时/fail」会在摘要阶段模拟失败，用于演示断点重试。
 - 种子数据与前端 Mock 完全一致：3 场会议、12 条待办（含 3 条逾期）、4 份资料、分享链接、审计日志等。
 - 配置 `DATABASE_URL` 时数据写穿 PostgreSQL（启动水合、变更 0.4s 内落库、退出前强制落库）；未配置则存内存，重启恢复种子。文件落 `apps/api/storage/`（已 gitignore）或 MinIO。
+- 配置 `REDIS_URL` 时任务进 `minutes:jobs`，由 `python -m app.worker` 消费：执行中暂存 `minutes:jobs:processing`（Worker 重启自动回灌）、异常重试 3 次后进 `minutes:jobs:dead`；进度经 Pub/Sub 回到 API 的 SSE，Pub/Sub 丢事件时 SSE 每 5s 按库兜底。未配 Redis 时自动退回进程内 asyncio，行为一致。
 
 ## 环境变量
 
@@ -67,7 +68,8 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 | `MINUTES_ENABLE_RESET` | `0` | 是否开放 `POST /dev/reset`，本地 E2E 需显式置 `1` |
 | `DATABASE_URL` | 空 | 配置后业务读写写穿 PostgreSQL（启动水合 / 变更落库），`/ready` 真实探测 | 
 | `MINUTES_STORE_BACKEND` | `postgres` | 配了 `DATABASE_URL` 时的后端选择；`memory` 强制纯内存（pytest 固定此值） |
-| `REDIS_URL` | 空 | 配置后 `/ready` 探测 Redis |
+| `REDIS_URL` | 空 | 配置后启用 Redis 队列 + 独立 Worker + Pub/Sub；不配则流水线回退进程内，`/ready` 标记未启用 |
+| `MINUTES_JOB_MAX_ATTEMPTS` | `3` | Worker 单任务最大尝试次数，超过后写入死信 `minutes:jobs:dead` |
 | `S3_ENDPOINT` | 空 | 对象存储内部地址（如 `http://minio:9000`）；四项 `S3_*` 齐全才启用 |
 | `S3_PUBLIC_ENDPOINT` | 同 `S3_ENDPOINT` | 生成预签名 URL 用的对外地址（本地 `http://localhost:9000`） |
 
@@ -98,9 +100,10 @@ npx playwright test   # 真实后端 20/20 通过
 | 种子入库 | `app/seed_db.py`（`python -m app.seed_db [--reset]`） | 完成，与 `build_seed()` 同源 |
 | 对象存储 | `app/objectstore.py`、`app/storage.py` | 完成：MinIO 私有桶 + 10 分钟预签名 URL；未配 S3 回退本地 |
 | 业务持久化 | `app/repository.py`（写穿） | 完成：启动水合 / 变更落库 / 退出强刷 / 库不可用降级内存；重启不丢数据 |
+| 任务队列与 Worker | `app/queue.py`、`app/worker.py` | 完成（v1.4）：Redis List 队列 + processing 回灌 + 3 次重试 + 死信；事件走 Pub/Sub；未配 Redis 回退进程内 |
 | 连接与就绪探测 | `app/db.py`、`GET /api/v1/ready` | 完成；未配置依赖时按「未启用」放行 |
 | 结构化日志 | `app/logging.py`（`MINUTES_LOG_FORMAT=json`） | 完成 |
-| 编排 | [infra/docker-compose.yml](../../infra/docker-compose.yml)、两个 Dockerfile、[Makefile](../../Makefile) | 完成，2026-10-29 实机跑通 |
+| 编排 | [infra/docker-compose.yml](../../infra/docker-compose.yml)、两个 Dockerfile、[Makefile](../../Makefile) | 完成（6 服务：postgres/redis/minio/api/worker/web），2026-10-29 实机跑通 |
 | 备份/恢复 | `scripts/backup.sh`、`scripts/restore.sh` | 完成（14 天保留），已演练一次 |
 | CI | [.github/workflows/ci.yml](../../.github/workflows/ci.yml) | 完成（pytest / 迁移 SQL / typecheck / lint / build / E2E） |
 
@@ -114,10 +117,11 @@ docker compose -f infra/docker-compose.yml --env-file .env run --rm api python -
 
 本机实测结果（Docker Desktop 4.97 / CLI 29.9.2）：
 
-- 5 个服务全部 Up（postgres/redis/minio/api healthy，web 运行中），`minio-init` 建桶后退 0
+- 6 个服务全部 Up（postgres/redis/minio/api healthy，worker 运行中，web 运行中），`minio-init` 建桶后退 0
 - 迁移后 15 张表（14 业务表 + `alembic_version`），`vector` 扩展与 4 个关键索引齐全
 - 种子：6 用户 / 2 工作区 / 3 会议 / 28 分段 / 3 摘要 / 12 待办 / 4 资料 / 5 审计
 - `/api/v1/ready`：database / redis / storage 均 `configured:true, ok:true`
+- 队列实测：新建会议 → Worker 消费 → `docker stop/start worker` 后任务回灌并跑完；坏任务 3 次后进死信；重试会议 SSE 收到 `status/progress/done`
 - 备份恢复演练：`pg_dump | gzip` → 临时库恢复，表数与行数一致
 - 镜像拉取提示：Docker Hub 直连超时，需配 `registry-mirrors`；minio 系列在 `docker.1panel.live` 可用
 
@@ -132,5 +136,13 @@ cd apps/api
 
 ## 与生产形态的差距
 
-演示版刻意收敛了基础设施：进程内 asyncio 流水线、单进程 SSE。数据已切 PostgreSQL（14 张表）、文件已切 MinIO；
-剩余生产化路径见 [项目开发文档.md](../../项目开发文档.md)：Redis 队列 + 独立 Worker、多副本 SSE。接口层与前端契约不变。
+基础设施已补齐：数据切 PostgreSQL（14 张表）、文件切 MinIO、任务切 Redis 队列 + 独立 Worker、SSE 经 Redis Pub/Sub。
+剩余生产化路径见 [项目开发文档.md](../../项目开发文档.md)：任务幂等去重、真实 ASR/LLM、指标告警、多副本 API 与 CD。接口层与前端契约不变。
+
+本地单独跑 Worker（不容器化时）：
+
+```powershell
+$env:DATABASE_URL='postgresql+psycopg://minutes:minutes@localhost:5432/minutes'
+$env:REDIS_URL='redis://localhost:6379/0'
+.\.venv\Scripts\python.exe -m app.worker
+```

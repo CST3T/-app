@@ -5,20 +5,28 @@
 - 标题包含「失败 / 超时 / fail」时在摘要阶段模拟一次失败，用于演示断点重试
 - 通过内存队列向 SSE 订阅者推送 status / progress / error / done
 
-演示版直接在进程内跑 asyncio 任务；生产环境替换为 Redis + Worker（见项目开发文档 3.x）。
+两种执行方式：
+- 有 PostgreSQL + Redis 时，任务投递给独立 Worker（`app/worker.py`），事件走
+  Redis Pub/Sub 再回到 API 的 SSE，进程重启不影响任务
+- 缺任一依赖（单测、本地纯内存）时退化为进程内 asyncio 任务，行为不变
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
 from collections import defaultdict
+from typing import Callable
 
+from . import queue as job_queue
 from . import repository
 from .store import db, find_meeting, now_iso
+
+logger = logging.getLogger("minutes.pipeline")
 
 SCALE = float(os.getenv("MINUTES_PIPELINE_SCALE", "1") or "1")
 TRANSCRIBE_SECONDS = 9.0 / SCALE
@@ -26,32 +34,58 @@ SUMMARIZE_SECONDS = 6.0 / SCALE
 TICK_SECONDS = 0.5 / SCALE
 
 _subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
+_subscriber_loops: dict[int, asyncio.AbstractEventLoop] = {}
 _jobs: dict[str, dict] = {}
 _task: asyncio.Task | None = None
+_publisher: Callable[[str, str, dict], None] | None = None
+
+
+def set_publisher(publisher: Callable[[str, str, dict], None] | None) -> None:
+    """Worker 用它把事件发到 Redis Pub/Sub；API 进程不设置（只转发本地订阅者）。"""
+    global _publisher
+    _publisher = publisher
 
 
 def subscribe(meeting_id: str, queue: asyncio.Queue) -> None:
     _subscribers[meeting_id].add(queue)
+    try:
+        _subscriber_loops[id(queue)] = asyncio.get_running_loop()
+    except RuntimeError:  # 没有事件循环（脚本调用）时按同步写入处理
+        pass
 
 
 def unsubscribe(meeting_id: str, queue: asyncio.Queue) -> None:
     subscribers = _subscribers.get(meeting_id)
-    if not subscribers:
-        return
-    subscribers.discard(queue)
-    if not subscribers:
-        _subscribers.pop(meeting_id, None)
+    if subscribers:
+        subscribers.discard(queue)
+        if not subscribers:
+            _subscribers.pop(meeting_id, None)
+    _subscriber_loops.pop(id(queue), None)
 
 
 def reset() -> None:
     """清空任务与订阅（仅供 dev reset / 测试隔离）。"""
     _jobs.clear()
     _subscribers.clear()
+    _subscriber_loops.clear()
 
 
 def emit(meeting_id: str, event: str, data: dict) -> None:
+    """本地 SSE 订阅者 + 跨进程广播各发一份。
+
+    事件可能来自其他线程（Redis 订阅线程），所以统一走 call_soon_threadsafe。
+    """
     for queue in list(_subscribers.get(meeting_id, set())):
-        queue.put_nowait((event, data))
+        loop = _subscriber_loops.get(id(queue))
+        try:
+            if loop is not None and loop.is_running():
+                loop.call_soon_threadsafe(queue.put_nowait, (event, data))
+            else:
+                queue.put_nowait((event, data))
+        except Exception:  # noqa: BLE001 - 连接已断开的订阅者直接跳过
+            continue
+    if _publisher is not None:
+        _publisher(meeting_id, event, data)
 
 
 def _should_fail(title: str) -> bool:
@@ -69,7 +103,8 @@ def _ensure_task() -> None:
         _task = asyncio.create_task(_run())
 
 
-def enqueue_job(meeting_id: str, from_stage: str = "transcribing") -> str | None:
+def prepare_job(meeting_id: str, from_stage: str = "transcribing") -> str | None:
+    """把会议置为处理中并登记任务，返回 job_id；不负责调度。"""
     meeting = find_meeting(meeting_id)
     if not meeting:
         return None
@@ -86,10 +121,63 @@ def enqueue_job(meeting_id: str, from_stage: str = "transcribing") -> str | None
     meeting["error"] = None
     meeting["updated_at"] = now_iso()
     repository.mark_dirty()
+    return _job_id(meeting_id)
+
+
+def _dispatch(meeting_id: str, from_stage: str, job_id: str) -> bool:
+    """PostgreSQL 与 Redis 都就绪时交给独立 Worker，否则留在本进程推进。"""
+    if repository.mode() != "postgres" or not job_queue.available():
+        return False
+    try:
+        # 先落库再入队，保证 Worker 取到任务时会议行已经存在
+        repository.flush(force=True)
+        if not job_queue.enqueue(
+            {
+                "meeting_id": meeting_id,
+                "from_stage": from_stage,
+                "job_id": job_id,
+                "attempts": 0,
+            }
+        ):
+            return False
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("投递任务失败，改由本进程执行：%s", exc)
+        return False
+    # 已交给 Worker，本进程不再 tick 这场会议，避免两边同时推进
+    _jobs.pop(meeting_id, None)
+    return True
+
+
+def enqueue_job(meeting_id: str, from_stage: str = "transcribing") -> str | None:
+    job_id = prepare_job(meeting_id, from_stage)
+    if job_id is None:
+        return None
+
+    if _dispatch(meeting_id, from_stage, job_id):
+        return job_id
 
     _ensure_task()
     _tick(time.monotonic())
-    return _job_id(meeting_id)
+    return job_id
+
+
+def run_job(meeting_id: str, from_stage: str, flush=None) -> str | None:
+    """Worker 专用：同步推进到终态，期间定期落库（flush 由调用方注入）。"""
+    job_id = prepare_job(meeting_id, from_stage)
+    if job_id is None:
+        return None
+
+    last_flush = time.monotonic()
+    while meeting_id in _jobs:
+        _tick(time.monotonic())
+        now = time.monotonic()
+        if flush is not None and now - last_flush >= 1.0:
+            flush()
+            last_flush = now
+        time.sleep(TICK_SECONDS)
+    if flush is not None:
+        flush()
+    return job_id
 
 
 def resume_incomplete() -> None:
@@ -285,9 +373,12 @@ def sse_frame(event: str, payload: dict) -> str:
 __all__ = [
     "emit",
     "enqueue_job",
+    "prepare_job",
     "reset",
     "resume_incomplete",
     "retry_job",
+    "run_job",
+    "set_publisher",
     "subscribe",
     "unsubscribe",
     "sse_frame",
