@@ -22,8 +22,11 @@ import time
 from collections import defaultdict
 from typing import Callable
 
+from . import asr
+from . import llm
 from . import queue as job_queue
 from . import repository
+from . import storage
 from .store import db, find_meeting, now_iso
 
 logger = logging.getLogger("minutes.pipeline")
@@ -222,7 +225,35 @@ def _tick(now: float) -> None:
             emit(meeting_id, "progress", {"status": "transcribing", "progress": progress})
 
             if ratio >= 1:
-                write_transcript(meeting_id)
+                try:
+                    write_transcript(meeting_id)
+                except Exception as exc:  # 真实 ASR 失败：标记 failed，用户可原地重试
+                    logger.warning("transcribe failed meeting=%s: %s", meeting_id, exc)
+                    message = str(exc) if isinstance(exc, asr.AsrError) else "语音识别失败，请稍后重试"
+                    meeting["status"] = "failed"
+                    meeting["progress"] = 2
+                    meeting["error"] = {
+                        "code": "INTERNAL_ERROR",
+                        "message": message,
+                        "stage": "transcribing",
+                        "retryable": True,
+                    }
+                    meeting["updated_at"] = now_iso()
+                    repository.mark_dirty()
+                    _jobs.pop(meeting_id, None)
+                    emit(
+                        meeting_id,
+                        "error",
+                        {
+                            "status": "failed",
+                            "code": "INTERNAL_ERROR",
+                            "message": message,
+                            "stage": "transcribing",
+                            "retryable": True,
+                        },
+                    )
+                    continue
+
                 if job["fail_at"] == "summarizing":
                     meeting["status"] = "failed"
                     meeting["progress"] = 70
@@ -264,7 +295,35 @@ def _tick(now: float) -> None:
             emit(meeting_id, "progress", {"status": "summarizing", "progress": progress})
 
             if ratio >= 1:
-                write_summary(meeting_id)
+                try:
+                    write_summary(meeting_id)
+                except Exception as exc:  # LLM 失败：标记 failed，转写结果已保留，可原地重试
+                    logger.warning("summarize failed meeting=%s: %s", meeting_id, exc)
+                    message = str(exc) if isinstance(exc, llm.LlmError) else "生成摘要失败，请稍后重试"
+                    meeting["status"] = "failed"
+                    meeting["progress"] = 70
+                    meeting["error"] = {
+                        "code": "INTERNAL_ERROR",
+                        "message": message,
+                        "stage": "summarizing",
+                        "retryable": True,
+                    }
+                    meeting["updated_at"] = now_iso()
+                    repository.mark_dirty()
+                    _jobs.pop(meeting_id, None)
+                    emit(
+                        meeting_id,
+                        "error",
+                        {
+                            "status": "failed",
+                            "code": "INTERNAL_ERROR",
+                            "message": message,
+                            "stage": "summarizing",
+                            "retryable": True,
+                        },
+                    )
+                    continue
+
                 meeting["status"] = "done"
                 meeting["progress"] = 100
                 meeting["error"] = None
@@ -288,59 +347,174 @@ TRANSCRIPT_TEMPLATE: list[tuple[int, int, str | None, str]] = [
 
 
 def write_transcript(meeting_id: str) -> None:
+    """转写阶段：配置了 ASR_PROVIDER=aliyun 时真实识别音频，否则写内置演示模板。"""
+    meeting = find_meeting(meeting_id)
+    segments: list[dict]
+
+    if meeting is not None and asr.enabled():
+        audio = storage.audio_bytes(meeting)
+        if audio is None:
+            raise asr.AsrError("找不到原始音频文件，无法进行语音识别")
+        segments = asr.transcribe(audio[0], audio[1], meeting.get("language") or "zh")
+        logger.info("asr done meeting=%s segments=%d", meeting_id, len(segments))
+    else:
+        segments = [
+            {"start_ms": start, "end_ms": end, "speaker": speaker, "content": content}
+            for start, end, speaker, content in TRANSCRIPT_TEMPLATE
+        ]
+
+    _save_segments(meeting_id, segments)
+    if meeting is not None and segments:
+        meeting["duration_sec"] = segments[-1]["end_ms"] / 1000
+
+
+def _save_segments(meeting_id: str, segments: list[dict]) -> None:
     db["transcript_segments"] = [
         s for s in db["transcript_segments"] if s["meeting_id"] != meeting_id
     ]
-    segments = []
-    for index, (start, end, speaker, content) in enumerate(TRANSCRIPT_TEMPLATE):
-        segments.append(
-            {
-                "id": f"{meeting_id}_s{index + 1:03d}",
-                "meeting_id": meeting_id,
-                "seq": index + 1,
-                "start_ms": start,
-                "end_ms": end,
-                "speaker": speaker,
-                "content": content,
-            }
-        )
-    db["transcript_segments"].extend(segments)
+    db["transcript_segments"].extend(
+        {
+            "id": f"{meeting_id}_s{index + 1:03d}",
+            "meeting_id": meeting_id,
+            "seq": index + 1,
+            "start_ms": segment["start_ms"],
+            "end_ms": segment["end_ms"],
+            "speaker": segment["speaker"],
+            "content": segment["content"],
+        }
+        for index, segment in enumerate(segments)
+    )
 
-    meeting = find_meeting(meeting_id)
-    if meeting and segments:
-        meeting["duration_sec"] = segments[-1]["end_ms"] / 1000
+
+def _transcript_text(meeting_id: str) -> str:
+    """把转写分段拼成带说话人的纯文本，供 LLM 阅读。"""
+    segs = sorted(
+        (s for s in db["transcript_segments"] if s["meeting_id"] == meeting_id),
+        key=lambda s: s.get("seq", 0),
+    )
+    lines: list[str] = []
+    for s in segs:
+        content = (s.get("content") or "").strip()
+        if not content:
+            continue
+        speaker = (s.get("speaker") or "").strip()
+        lines.append(f"{speaker}：{content}" if speaker else content)
+    return "\n".join(lines)
+
+
+# 纯本地抽取式摘要（无 LLM Key 或云端不可用时使用）：只从真实转写文本中
+# 拆分句子、按关键词归类，绝不生成转写中不存在的内容。
+_SENT_SPLIT_RE = re.compile(r"[。！？!?；;\n]+")
+_DECISION_HINTS = ("决定", "确定", "就这么定", "同意", "通过", "批准", "达成一致", "敲定", "确认")
+_RISK_HINTS = ("风险", "隐患", "担心", "可能", "阻塞", "待确认", "不确定", "延期", "来不及", "故障")
+_ACTION_HINTS = (
+    "需要", "负责", "跟进", "完成", "落实", "安排", "排期", "尽快", "推进", "对接",
+    "修改", "修复", "补上", "补充", "准备", "输出", "明天", "后天", "下周", "本周", "月底前", "之前",
+)
+_TOPIC_SPLIT_RE = re.compile(r"[\s/／、，,和与及\-:：·|]+")
+
+
+def _split_sentences(text: str) -> list[str]:
+    """按句末标点切句，去重并过滤过短/过长的句子。"""
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in _SENT_SPLIT_RE.split(text):
+        sentence = part.strip(" 　,，、:：")
+        if 4 <= len(sentence) <= 80 and sentence not in seen:
+            seen.add(sentence)
+            result.append(sentence)
+    return result
+
+
+def _derive_topics(title: str | None, sentences: list[str]) -> list[str]:
+    """议题优先取会议标题切词，其次取像议题的短句。"""
+    topics: list[str] = []
+    if title:
+        for piece in _TOPIC_SPLIT_RE.split(title):
+            piece = piece.strip()
+            if 2 <= len(piece) <= 12 and piece not in topics:
+                topics.append(piece)
+    for sentence in sentences:
+        if len(sentence) <= 12 and not any(h in sentence for h in _ACTION_HINTS + _RISK_HINTS):
+            if sentence not in topics:
+                topics.append(sentence)
+        if len(topics) >= 4:
+            break
+    return topics[:4] or ["会议要点"]
+
+
+def _offline_summary_content(meeting_id: str, title: str | None) -> dict:
+    """无云端 LLM 时基于真实转写的兜底摘要。"""
+    segs = sorted(
+        (s for s in db["transcript_segments"] if s["meeting_id"] == meeting_id),
+        key=lambda s: s.get("seq", 0),
+    )
+    spoken: list[tuple[str, str | None]] = []
+    for seg in segs:
+        speaker = (seg.get("speaker") or "").strip() or None
+        for sentence in _split_sentences(seg.get("content") or ""):
+            spoken.append((sentence, speaker))
+
+    if not spoken:
+        return {
+            "topics": [],
+            "key_points": ["未识别到有效语音内容，请检查录音质量后重新生成摘要"],
+            "decisions": [],
+            "risks": [],
+            "action_items": [],
+        }
+
+    topics = _derive_topics(title, [s for s, _ in spoken])
+    key_points: list[str] = []
+    decisions: list[str] = []
+    risks: list[str] = []
+    action_items: list[dict] = []
+    for sentence, speaker in spoken:
+        if any(h in sentence for h in _DECISION_HINTS):
+            decisions.append(sentence)
+        elif any(h in sentence for h in _ACTION_HINTS):
+            action_items.append({"title": sentence, "owner": speaker, "due_date": None})
+        elif any(h in sentence for h in _RISK_HINTS):
+            risks.append(sentence)
+        else:
+            key_points.append(sentence)
+
+    if not key_points:
+        key_points = [s for s, _ in spoken][:3]
+
+    return {
+        "topics": topics,
+        "key_points": key_points[:6],
+        "decisions": decisions[:4],
+        "risks": risks[:4],
+        "action_items": action_items[:5],
+    }
 
 
 def write_summary(meeting_id: str) -> None:
     existing = [s for s in db["summaries"] if s["meeting_id"] == meeting_id]
     version = len(existing) + 1
+    meeting = find_meeting(meeting_id)
+    title = (meeting or {}).get("title")
 
-    content = {
-        "topics": ["上期遗留问题", "稳定性方案", "并发与锁", "可观测性"],
-        "key_points": [
-            "上期两个遗留问题：接口超时已修复，数据不一致仍在排查（疑似并发写入未加锁）",
-            "前端已加入重试与本地缓存，用户侧感知不明显，但错误提示需要更明确",
-            "本次迭代目标锁定「稳定性」，暂不引入新功能",
-        ],
-        "decisions": [
-            "关键写操作引入分布式锁，冲突返回 409 STATE_CONFLICT",
-            "日志统一结构化，必须携带 request_id 便于排查",
-        ],
-        "risks": [
-            "分布式锁若超时设置不合理会造成长时间阻塞",
-            "缺少并发压测会导致问题在线上才暴露",
-        ],
-        "action_items": [
-            {"title": "关键写操作加分布式锁", "owner": "陈慕", "due_date": None},
-            {"title": "补并发场景用例并纳入压测", "owner": "赵时", "due_date": None},
-        ],
-    }
+    if llm.enabled():
+        try:
+            content, model = llm.summarize(_transcript_text(meeting_id), title)
+            logger.info("llm summary done meeting=%s model=%s", meeting_id, model)
+        except llm.LlmError as exc:
+            # 云端不可用（断网 / Key 失效 / 超时）时回退本地摘要，保证整场不失败
+            logger.warning("llm unavailable, fallback to local summary meeting=%s: %s", meeting_id, exc)
+            content = _offline_summary_content(meeting_id, title)
+            model = "local-extractive-v1"
+    else:
+        content = _offline_summary_content(meeting_id, title)
+        model = "local-extractive-v1"
 
     db["summaries"].append(
         {
             "id": f"sum_{meeting_id}_v{version}",
             "meeting_id": meeting_id,
-            "model": "mock-llm-v1",
+            "model": model,
             "version": version,
             "status": "ok",
             "content": content,
@@ -349,13 +523,14 @@ def write_summary(meeting_id: str) -> None:
     )
 
     for index, item in enumerate(content["action_items"]):
-        owner = next((u for u in db["users"] if u["name"] == item["owner"]), None)
+        owner_name = item["owner"]
+        owner = next((u for u in db["users"] if u["name"] == owner_name), None)
         db["action_items"].append(
             {
                 "id": f"ai_gen_{meeting_id}_{index}",
                 "meeting_id": meeting_id,
                 "owner_id": owner["id"] if owner else None,
-                "owner_name": owner["name"] if owner else None,
+                "owner_name": owner["name"] if owner else owner_name,
                 "title": item["title"],
                 "status": "todo",
                 "priority": "medium",

@@ -125,6 +125,11 @@ def build_meeting_detail(meeting: dict, role: str) -> dict:
         reverse=True,
     )
     segments = [s for s in db["transcript_segments"] if s["meeting_id"] == meeting_id]
+    # meeting 对象里带上播放地址：前端详情页从 detail.meeting 读取
+    # 延迟导入：storage 顶部反向依赖 store.db，顶层导入会形成循环依赖
+    from .storage import audio_url_for
+
+    meeting = {**meeting, "audio_url": audio_url_for(meeting)}
     return {
         "meeting": meeting,
         "summary": summary,

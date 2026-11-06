@@ -53,18 +53,8 @@ async def register(request: Request):
     }
     db["users"].append(user)
 
-    demo = db["workspace_members"].setdefault("ws_demo", [])
-    demo.append(
-        {
-            "user_id": user["id"],
-            "email": user["email"],
-            "name": user["name"],
-            "phone": None,
-            "avatar_url": None,
-            "role": "member",
-            "joined_at": now_iso(),
-        }
-    )
+    # 新用户不属于任何工作区：工作区列表为空，由用户自行创建，
+    # 避免看到演示工作区中与自己无关的会议与待办。
     return ok(create_tokens(user["id"]), 201)
 
 

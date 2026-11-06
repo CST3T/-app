@@ -26,7 +26,7 @@ from datetime import date, datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import storage, store
+from . import localstore, storage, store
 from .db import db_ping, get_engine
 from .models import (
     ActionItem,
@@ -77,13 +77,45 @@ def mark_dirty() -> None:
 
 
 def pending() -> bool:
-    return _dirty and enabled()
+    return _dirty and _mode in ("postgres", "local")
+
+
+def _init_local() -> str:
+    """免安装版：从本地 JSON 快照恢复；没有快照就把当前种子数据写一份。"""
+    global _mode
+    try:
+        data = localstore.load()
+    except Exception as exc:  # noqa: BLE001 - 快照损坏时宁可回到种子也不能让服务起不来
+        logger.warning("本地快照不可用，本次退回内存存储：%s", exc)
+        _mode = "memory"
+        return _mode
+
+    if data is None:
+        try:
+            localstore.save(store.db)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("本地快照初始化写入失败，本次退回内存存储：%s", exc)
+            _mode = "memory"
+            return _mode
+    else:
+        store.db.clear()
+        store.db.update(data)
+        logger.info(
+            "已从本地快照恢复：%s 个用户 / %s 场会议",
+            len(store.db.get("users", [])),
+            len(store.db.get("meetings", [])),
+        )
+
+    _mode = "local"
+    return _mode
 
 
 def init() -> str:
     """启动入口：决定本次进程的存储模式，并完成水合或种子入库。"""
     global _mode
     if not enabled():
+        if localstore.enabled():
+            return _init_local()
         _mode = "memory"
         return _mode
 
@@ -116,20 +148,23 @@ def init() -> str:
 
 
 def flush(force: bool = False) -> bool:
-    """把当前内存快照落库；失败保留脏标记，等下一轮重试。"""
+    """把当前内存快照落库（PostgreSQL 或本地 JSON）；失败保留脏标记等下一轮重试。"""
     global _dirty
-    if not enabled() or _mode != "postgres":
+    if _mode not in ("postgres", "local"):
         return False
     if not (_dirty or force):
         return False
 
     _dirty = False
     try:
-        save_all()
+        if _mode == "local":
+            localstore.save(store.db)
+        else:
+            save_all()
         return True
     except Exception as exc:  # noqa: BLE001
         _dirty = True
-        logger.warning("落库失败，稍后重试：%s", exc)
+        logger.warning("落盘失败，稍后重试：%s", exc)
         return False
 
 

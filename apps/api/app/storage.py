@@ -48,11 +48,45 @@ def save_audio(meeting: dict, data: bytes) -> None:
     db["audio_files"][meeting["id"]] = str(path)
 
 
+def audio_bytes(meeting: dict) -> tuple[bytes, str] | None:
+    """读取会议原始音频，返回 (内容, 扩展名)；没有音频时返回 None。"""
+    key = meeting.get("audio_key")
+    ext = key.rsplit(".", 1)[-1] if key and "." in key else "m4a"
+
+    if key and s3_enabled():
+        data = objectstore.read(key)
+        if data is not None:
+            return data, ext
+
+    path = db["audio_files"].get(meeting["id"])
+    if path and Path(path).exists():
+        return Path(path).read_bytes(), path.rsplit(".", 1)[-1]
+
+    return None
+
+
+def audio_file_path(meeting: dict) -> Path | None:
+    """本地模式下音频文件的真实路径；不存在返回 None。"""
+    path = db["audio_files"].get(meeting["id"])
+    if path and Path(path).exists():
+        return Path(path)
+    # 兜底：按 audio_key 推导默认文件名
+    key = meeting.get("audio_key")
+    if key:
+        ext = key.rsplit(".", 1)[-1] if "." in key else "m4a"
+        candidate = AUDIO_DIR / f"{meeting['id']}.{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def audio_url_for(meeting: dict) -> str | None:
-    """播放地址：对象存储启用且对象存在时返回 10 分钟签名 URL，否则沿用原值。"""
+    """播放地址：对象存储启用时返回签名 URL；本地文件存在时走流式播放端点。"""
     key = meeting.get("audio_key")
     if s3_enabled() and key and objectstore.exists(key):
         return objectstore.signed_url(key)
+    if audio_file_path(meeting) is not None:
+        return f"/api/v1/meetings/{meeting['id']}/audio/content"
     return meeting.get("audio_url")
 
 

@@ -72,6 +72,20 @@ NEXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
 | `MINUTES_JOB_MAX_ATTEMPTS` | `3` | Worker 单任务最大尝试次数，超过后写入死信 `minutes:jobs:dead` |
 | `S3_ENDPOINT` | 空 | 对象存储内部地址（如 `http://minio:9000`）；四项 `S3_*` 齐全才启用 |
 | `S3_PUBLIC_ENDPOINT` | 同 `S3_ENDPOINT` | 生成预签名 URL 用的对外地址（本地 `http://localhost:9000`） |
+| `ASR_PROVIDER` | `local` | 转写来源：`local`（本地 faster-whisper，免费离线）/ `aliyun`（阿里云智能语音交互）/ `mock`（内置演示模板） |
+| `LOCAL_ASR_MODEL` | `small` | 本地模型：`tiny` / `base` / `small` / `medium`；`small` 约 480MB，首次运行自动下载 |
+| `LOCAL_ASR_DEVICE` | `cpu` | `cpu` 或 `cuda`（需 NVIDIA GPU） |
+| `LOCAL_ASR_COMPUTE_TYPE` | `int8` | CPU 用 `int8`；GPU 用 `float16` |
+| `LOCAL_ASR_MODEL_DIR` | 空 | 模型缓存目录；compose 内为卷 `whispermodels:/data/models` |
+| `LOCAL_ASR_PROMPT` | 空 | 识别提示词（如会议热词）；中文缺省用「以下是普通话的句子。」避免输出繁体 |
+| `HF_ENDPOINT` | 空 | 模型下载源；国内建议 `https://hf-mirror.com` |
+| `ALIYUN_NLS_APP_KEY` | 空 | 阿里云「全部项目」里的项目 Appkey，`aliyun` 模式必填 |
+| `ALIYUN_NLS_TOKEN` | 空 | 控制台临时 Token（有有效期），与 AccessKey 二选一 |
+| `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` | 空 | RAM 用户 AccessKey，自动换取并缓存 NLS Token（需 `AliyunNLSSpeechServiceAccess`） |
+| `ALIYUN_NLS_REGION` | `cn-shanghai` | Token / 识别网关地域 |
+| `ALIYUN_NLS_SAMPLE_RATE` | `16000` | `8000` 电话录音 / `16000` 普通会议录音 |
+
+> 转写接入说明：`ASR_PROVIDER=local` 时，`pipeline.write_transcript()` 读取会议原始音频 → 本地 faster-whisper 识别 → 用真实结果覆盖转写分段（完全免费、可离线，CPU int8 可用；首次识别下载模型到 `whispermodels` 卷）。`ASR_PROVIDER=aliyun` 且凭证齐备时改走阿里云「录音文件识别极速版」。识别失败会把会议标记为 `failed`（阶段 `transcribing`），可原地重试，重试与死信逻辑沿用现有队列。`mock` 为演示模板，单测与便携演示不受影响。摘要与待办仍是 mock（LLM Adapter 待接）。
 
 ## 测试
 

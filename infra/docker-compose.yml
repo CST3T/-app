@@ -84,6 +84,30 @@ services:
       MINUTES_LOG_LEVEL: ${MINUTES_LOG_LEVEL:-INFO}
       MINUTES_PIPELINE_SCALE: ${MINUTES_PIPELINE_SCALE:-1}
       MINUTES_STORAGE_DIR: /data/storage
+      # 语音识别：local（默认，免费离线 faster-whisper）/ aliyun / mock
+      ASR_PROVIDER: ${ASR_PROVIDER:-local}
+      # 镜像内已内置模型（Dockerfile: COPY models /models），无需运行时下载
+      LOCAL_ASR_MODEL: ${LOCAL_ASR_MODEL:-/models/faster-whisper-small}
+      LOCAL_ASR_MODEL_DIR: /models
+      LOCAL_ASR_DEVICE: ${LOCAL_ASR_DEVICE:-cpu}
+      LOCAL_ASR_COMPUTE_TYPE: ${LOCAL_ASR_COMPUTE_TYPE:-int8}
+      LOCAL_ASR_PROMPT: ${LOCAL_ASR_PROMPT:-}
+      # 模型下载源；国内可用 https://hf-mirror.com
+      HF_ENDPOINT: ${HF_ENDPOINT:-}
+      # 镜像站不支持 HF 的 Xet 传输协议，需关闭，否则下载报 401
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      ALIYUN_NLS_APP_KEY: ${ALIYUN_NLS_APP_KEY:-}
+      ALIYUN_NLS_TOKEN: ${ALIYUN_NLS_TOKEN:-}
+      ALIYUN_ACCESS_KEY_ID: ${ALIYUN_ACCESS_KEY_ID:-}
+      ALIYUN_ACCESS_KEY_SECRET: ${ALIYUN_ACCESS_KEY_SECRET:-}
+      ALIYUN_NLS_REGION: ${ALIYUN_NLS_REGION:-cn-shanghai}
+      ALIYUN_NLS_SAMPLE_RATE: ${ALIYUN_NLS_SAMPLE_RATE:-16000}
+      # 云端 LLM 摘要：配了 LLM_API_KEY 即启用（OpenAI 兼容，默认阿里通义 qwen-plus）；留空走演示模板
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-qwen-plus}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-90}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

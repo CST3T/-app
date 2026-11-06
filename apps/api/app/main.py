@@ -138,13 +138,17 @@ def _on_worker_event(meeting_id: str, event: str | None, data: dict) -> None:
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    """选择存储后端：PostgreSQL 可用则水合/写种子，否则保持纯内存。"""
+    """选择存储后端：PostgreSQL / 本地快照 / 纯内存。"""
     mode = repository.init()
     app.state.store_mode = mode
     app.state.flush_task = None
     if mode == "postgres":
         # 有 Redis 时订阅 Worker 的广播，并把中断的任务重新投递；否则留在本进程跑完
         app.state.event_listener = job_queue.start_event_listener(_on_worker_event)
+        pipeline.resume_incomplete()
+        app.state.flush_task = asyncio.create_task(_flush_loop())
+    elif mode == "local":
+        # 免安装版：进程内推进处理任务，写请求经后台循环周期写入本地快照
         pipeline.resume_incomplete()
         app.state.flush_task = asyncio.create_task(_flush_loop())
 
@@ -175,7 +179,7 @@ async def dev_reset():
     db.clear()
     db.update(build_seed())
     reset_pipeline()
-    if repository.mode() == "postgres":
+    if repository.mode() in ("postgres", "local"):
         await asyncio.to_thread(repository.flush, True)
     # 清掉队列里的旧任务并换代号，避免 Worker 把重置前的会议又写回库
     job_queue.purge()

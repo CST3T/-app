@@ -42,6 +42,8 @@ __pycache__/
 .venv/
 apps/api/storage/
 apps/api/.coverage
+# 内置离线 ASR 模型体积大（约 460 MB），不入库；分发时连同该文件夹一起打包
+apps/api/models/
 infra/schema.sql
 
 # platform

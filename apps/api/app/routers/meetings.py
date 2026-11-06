@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response, StreamingResponse
@@ -30,7 +32,15 @@ from ..store import (
     now_iso,
     role_of,
 )
-from ..storage import attachment_bytes, attachment_url_for, audio_url_for, delete_attachment_file, save_attachment, save_audio
+from ..storage import (
+    attachment_bytes,
+    attachment_url_for,
+    audio_file_path,
+    audio_url_for,
+    delete_attachment_file,
+    save_attachment,
+    save_audio,
+)
 
 router = APIRouter()
 
@@ -287,6 +297,64 @@ async def replace_audio(meeting_id: str, request: Request):
     meeting["audio_bytes"] = len(data)
     save_audio(meeting, data)
     return ok(meeting, 201)
+
+
+@router.get("/meetings/{meeting_id}/audio/content")
+async def audio_content(meeting_id: str, request: Request):
+    """音频流式播放：支持 HTTP Range（拖动进度条 / 转写联动 seek 必需）。
+
+    免鉴权：浏览器 <audio> 标签无法携带 Authorization 头，本地单机服务
+    （仅绑定 127.0.0.1）与附件内容端点保持同一暴露面。
+    """
+    meeting = find_meeting(meeting_id)
+    if not meeting:
+        raise not_found("会议不存在或已被删除")
+    path = audio_file_path(meeting)
+    if path is None:
+        raise not_found("音频文件不存在")
+
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    file_size = path.stat().st_size
+    start, end, status = 0, file_size - 1, 200
+
+    range_header = request.headers.get("range") or ""
+    if range_header.startswith("bytes="):
+        try:
+            first, _, last = range_header[6:].partition("-")
+            if first.strip():
+                start = max(0, int(first))
+            if last.strip():
+                end = min(int(last), file_size - 1)
+            if start >= file_size:
+                return Response(
+                    status_code=416,
+                    headers={"Content-Range": f"bytes */{file_size}"},
+                )
+            end = min(end, file_size - 1)
+            if start <= end:
+                status = 206
+        except ValueError:
+            start, end, status = 0, file_size - 1, 200
+
+    def iter_file():
+        remaining = end - start + 1
+        with open(path, "rb") as handle:
+            handle.seek(start)
+            while remaining > 0:
+                chunk = handle.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+        "Content-Length": str(end - start + 1),
+    }
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    return StreamingResponse(iter_file(), status_code=status, media_type=mime, headers=headers)
 
 
 @router.post("/meetings/{meeting_id}/process")
@@ -639,10 +707,14 @@ async def attachment_content(attachment_id: str):
     if not meta:
         raise not_found("资料不存在")
     data, media_type = attachment_bytes(meta)
+    filename = quote(str(meta.get("file_name") or "attachment"))
     return Response(
         content=data,
         media_type=media_type,
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+            "Cache-Control": "no-store",
+        },
     )
 
 

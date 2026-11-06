@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import random
 import secrets
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 
+from .. import llm
 from ..api_utils import guard_meeting, read_json, require_user
+from ..docgen import build_docx
 from ..errors import ApiError, forbidden, not_found, validation
 from ..http import empty, ok
 from ..store import (
@@ -371,4 +376,131 @@ async def public_share(token: str):
             "workspace_name": workspace["name"] if workspace else "共享工作区",
             "expires_at": link["expires_at"],
         }
+    )
+
+
+# --------------------------------------------------------------------- #
+# AI 会议文档（分享 → 生成 Word 文档，可直接保存）                        #
+# --------------------------------------------------------------------- #
+
+def _format_ms(ms: int) -> str:
+    seconds = max(0, int((ms or 0) / 1000))
+    minutes, sec = divmod(seconds, 60)
+    return f"{minutes:02d}:{sec:02d}"
+
+
+def _latest_summary_content(meeting_id: str) -> dict | None:
+    versions = sorted(
+        [s for s in db["summaries"] if s["meeting_id"] == meeting_id],
+        key=lambda s: s["version"],
+        reverse=True,
+    )
+    return versions[0]["content"] if versions else None
+
+
+def _meeting_segments(meeting_id: str) -> list[dict]:
+    return sorted(
+        [s for s in db["transcript_segments"] if s["meeting_id"] == meeting_id],
+        key=lambda s: s["seq"],
+    )
+
+
+def _transcript_text(segments: list[dict]) -> str:
+    lines = []
+    for segment in segments:
+        speaker = segment.get("speaker") or "发言人"
+        lines.append(f"[{_format_ms(segment.get('start_ms') or 0)}] {speaker}：{segment['content']}")
+    return "\n".join(lines)
+
+
+def _fallback_document(meeting: dict, summary: dict | None, segments: list[dict]) -> dict:
+    """未配置 LLM 或调用失败时，用已有摘要 + 转写稿拼一份结构化文档。"""
+    sections: list[dict] = []
+    if summary:
+        if summary.get("topics"):
+            sections.append({"heading": "议题", "paragraphs": [], "bullets": summary["topics"]})
+        if summary.get("key_points"):
+            sections.append({"heading": "讨论要点", "paragraphs": [], "bullets": summary["key_points"]})
+        if summary.get("decisions"):
+            sections.append({"heading": "结论与决议", "paragraphs": [], "bullets": summary["decisions"]})
+        if summary.get("risks"):
+            sections.append({"heading": "风险与待确认", "paragraphs": [], "bullets": summary["risks"]})
+        items = summary.get("action_items") or []
+        if items:
+            bullets = []
+            for item in items:
+                owner = item.get("owner") or "未指定"
+                due = f"（{item['due_date']}）" if item.get("due_date") else ""
+                bullets.append(f"{item['title']} —— 责任人：{owner}{due}")
+            sections.append({"heading": "后续行动", "paragraphs": [], "bullets": bullets})
+    if segments:
+        preview = [
+            f"[{_format_ms(s.get('start_ms') or 0)}] {s.get('speaker') or '发言人'}：{s['content']}"
+            for s in segments[:80]
+        ]
+        sections.append({"heading": "转写摘录", "paragraphs": [], "bullets": preview})
+    if not sections:
+        raise ApiError(409, "STATE_CONFLICT", "该会议还没有可用的转写或摘要内容，请等待处理完成")
+    return {
+        "title": meeting["title"],
+        "overview": f"本纪要由「会记 Minutes」根据会议「{meeting['title']}」的转写与摘要内容整理。",
+        "sections": sections,
+    }
+
+
+@router.post("/meetings/{meeting_id}/share-document")
+async def share_document(meeting_id: str, request: Request):
+    """把会议内容用 AI 整理成 Word 文档，浏览器直接下载保存。"""
+    meeting, user, _role = guard_meeting(request, meeting_id)
+    body = await read_json(request)
+    include_transcript = bool(body.get("include_transcript"))
+
+    summary = _latest_summary_content(meeting_id)
+    segments = _meeting_segments(meeting_id)
+    if not segments and not summary:
+        raise ApiError(409, "STATE_CONFLICT", "该会议还没有可用的转写或摘要内容，请等待处理完成")
+
+    doc = None
+    if llm.enabled():
+        try:
+            doc, _model = await asyncio.to_thread(
+                llm.compose_document,
+                _transcript_text(segments),
+                meeting["title"],
+                summary,
+            )
+        except llm.LlmError:
+            doc = None
+    if doc is None:
+        doc = _fallback_document(meeting, summary, segments)
+
+    blocks: list[tuple[str, str]] = [("title", doc["title"]), ("meta", f"整理人：{user['name']} · 由 AI 根据会议内容生成")]
+    if doc.get("overview"):
+        blocks.append(("h2", "会议总览"))
+        blocks.append(("p", doc["overview"]))
+    for index, section in enumerate(doc["sections"], start=1):
+        blocks.append(("h2", f"{index}. {section['heading']}"))
+        for paragraph in section.get("paragraphs", []):
+            blocks.append(("p", paragraph))
+        for bullet in section.get("bullets", []):
+            blocks.append(("bullet", bullet))
+    if include_transcript and segments:
+        blocks.append(("pb", ""))
+        blocks.append(("h2", "附录：完整转写稿"))
+        for segment in segments:
+            speaker = segment.get("speaker") or "发言人"
+            blocks.append(
+                ("p", f"[{_format_ms(segment.get('start_ms') or 0)}] {speaker}：{segment['content']}")
+            )
+
+    data = build_docx(blocks)
+    audit(meeting["workspace_id"], user, "share.document", f"{meeting_id} · AI 文档")
+    filename = quote(f"{meeting['title']}-会议纪要.docx")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "Cache-Control": "no-store",
+        },
     )
