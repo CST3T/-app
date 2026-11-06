@@ -197,14 +197,7 @@ const authHandlers = [
       avatar_url: null,
     }
     db.users.push(user)
-    // 注册即加入演示工作区，方便直接体验
-    db.workspaceMembers.ws_demo.push({
-      user_id: user.id,
-      email: user.email,
-      name: user.name,
-      role: 'member',
-      joined_at: new Date().toISOString(),
-    })
+    // 新用户不属于任何工作区，进入后工作区列表为空，由用户自行创建
     return ok(
       {
         access_token: `mock.access.${user.id}`,

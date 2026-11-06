@@ -4,9 +4,9 @@
 
 @layer base {
   :root {
-    --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI',
-      Roboto, 'Helvetica Neue', sans-serif;
-    --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei',
+      'Helvetica Neue', sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', Consolas, 'Liberation Mono', monospace;
 
     /* 亮色主题：底色偏暖灰，主色为低饱和靛蓝 */
     --background: 220 20% 97%;
@@ -57,51 +57,61 @@
   }
 
   .dark {
-    /* 深色主题：近黑深蓝底 + 青蓝霓虹，科技感暗调 */
-    --background: 228 30% 5%;
-    --foreground: 210 20% 94%;
+    /* 深色玻璃拟态主题：深藏青墨黑底 + 青蓝主色 + 紫/翠/琥数据色
+       色彩规范取自 Dark Glassmorphism Design System */
+    --background: 225 44% 7%;
+    --foreground: 210 36% 96%;
 
-    --card: 228 26% 8%;
-    --card-foreground: 210 20% 94%;
+    --card: 221 39% 11%;
+    --card-foreground: 210 36% 96%;
 
-    --popover: 228 26% 10%;
-    --popover-foreground: 210 20% 94%;
+    --popover: 222 34% 13%;
+    --popover-foreground: 210 36% 96%;
 
-    --surface: 228 22% 11%;
-    --surface-hover: 228 20% 16%;
+    --surface: 218 32% 15%;
+    --surface-hover: 215 28% 20%;
 
-    --primary: 190 92% 62%;
-    --primary-foreground: 228 40% 6%;
-    --primary-soft: 190 55% 17%;
+    --primary: 188 86% 53%;
+    --primary-foreground: 200 80% 8%;
+    --primary-soft: 188 86% 53%;
 
-    --secondary: 228 18% 14%;
-    --secondary-foreground: 210 18% 90%;
+    --secondary: 218 28% 18%;
+    --secondary-foreground: 210 30% 92%;
 
-    --muted: 228 16% 15%;
-    --muted-foreground: 215 14% 62%;
+    --muted: 218 26% 17%;
+    --muted-foreground: 215 18% 56%;
 
-    --accent: 265 84% 70%;
-    --accent-foreground: 228 40% 8%;
+    --accent: 255 92% 76%;
+    --accent-foreground: 255 60% 10%;
 
-    --destructive: 352 78% 63%;
-    --destructive-foreground: 228 40% 8%;
+    --destructive: 0 91% 71%;
+    --destructive-foreground: 0 60% 10%;
 
-    --border: 220 18% 19%;
-    --input: 220 18% 23%;
-    --ring: 190 92% 62%;
+    --border: 215 25% 23%;
+    --input: 217 24% 28%;
+    --ring: 188 86% 53%;
 
-    /* 霓虹辉光基准色，统一供阴影与渐变使用 */
-    --glow: 190 92% 62%;
+    --radius: 1rem;
 
-    --status-uploaded: 214 12% 62%;
-    --status-transcribing: 199 92% 66%;
-    --status-summarizing: 268 72% 72%;
-    --status-done: 158 62% 55%;
-    --status-failed: 352 78% 66%;
+    /* 青色辉光基准色，统一供阴影与渐变使用 */
+    --glow: 188 86% 53%;
 
-    --priority-high: 352 78% 66%;
-    --priority-medium: 36 88% 62%;
-    --priority-low: 214 12% 62%;
+    --status-uploaded: 215 18% 56%;
+    --status-transcribing: 188 86% 53%;
+    --status-summarizing: 255 92% 76%;
+    --status-done: 158 64% 52%;
+    --status-failed: 0 91% 71%;
+
+    --priority-high: 0 91% 71%;
+    --priority-medium: 43 96% 56%;
+    --priority-low: 215 18% 56%;
+
+    /* 玻璃拟态材质 token */
+    --glass-bg: rgba(255, 255, 255, 0.04);
+    --glass-bg-strong: rgba(255, 255, 255, 0.07);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --glass-blur: 20px;
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -126,27 +136,64 @@
     background-attachment: fixed;
   }
 
+  .dark body {
+    /* 深藏青夜空：青蓝光晕 + 紫辉，多层径向渐变营造深度 */
+    background-color: hsl(225 44% 7%);
+    background-image:
+      radial-gradient(1100px 680px at 12% -12%, hsl(200 82% 32% / 0.34), transparent 62%),
+      radial-gradient(900px 620px at 92% 4%, hsl(222 70% 30% / 0.3), transparent 60%),
+      radial-gradient(1000px 700px at 50% 118%, hsl(195 72% 22% / 0.36), transparent 66%);
+  }
+
+  /* 登录/注册等全屏页：玻璃界面下层的高清照片底景（轻微虚化，纯装饰，不拦截交互） */
+  .dark body::before {
+    content: '';
+    position: fixed;
+    inset: -8px;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      linear-gradient(180deg, hsl(225 50% 6% / 0.55), hsl(225 52% 4% / 0.66)),
+      url('/images/glass-bg.jpg') center / cover no-repeat;
+    filter: blur(2px) saturate(0.95);
+    transform: scale(1.01);
+  }
+
   ::selection {
     background-color: hsl(var(--primary) / 0.3);
   }
 
-  /* 输入类控件的聚焦统一为霓虹光晕 */
+  /* 输入类控件的聚焦统一为青蓝光晕 */
   :focus-visible {
     outline: none;
   }
 }
 
 @layer components {
-  /* 玻璃拟态卡片：卡片化设计的主要载体 */
+  /* 玻璃拟态卡片：半透明磨砂 + 白色高光边 + 柔和深影 */
   .panel {
-    @apply relative rounded-xl border border-border/70 bg-card/70 backdrop-blur-md;
+    @apply relative rounded-xl border backdrop-blur-xl;
+    border-color: var(--glass-border, hsl(var(--border) / 0.7));
+    background: var(--glass-bg-strong, hsl(var(--card) / 0.7));
     box-shadow:
-      inset 0 1px 0 hsl(var(--foreground) / 0.04),
-      0 30px 70px -50px hsl(var(--primary) / 0.65);
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      var(--glass-shadow, 0 30px 70px -50px hsl(var(--primary) / 0.65));
+  }
+
+  .dark .panel {
+    background: var(--glass-bg-strong);
+    border-color: var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      var(--glass-shadow);
   }
 
   .panel-hover {
-    @apply transition-colors duration-200 hover:border-border hover:bg-surface-hover/60;
+    @apply transition-colors duration-200 hover:bg-surface-hover/60;
+  }
+
+  .dark .panel-hover {
+    @apply hover:border-white/20;
   }
 
   /* 科技网格：仅作背景装饰，不拦截鼠标 */
@@ -208,6 +255,132 @@
 
   .scroll-thin::-webkit-scrollbar-thumb:hover {
     background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@layer components {
+  /* 桌面底层：微虚化照片 + 藏青压暗 + 青蓝/紫微光（纯装饰，不拦截交互） */
+  .desktop-sky {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background-color: hsl(225 46% 6%);
+    background-image: url('/images/glass-bg.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    transform: scale(1.02);
+    filter: blur(1px) saturate(0.95) brightness(0.96);
+  }
+
+  .desktop-sky::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(180deg, hsl(225 50% 6% / 0.48), hsl(225 52% 4% / 0.64)),
+      radial-gradient(1100px 700px at 50% 122%, hsl(198 78% 26% / 0.26), transparent 68%),
+      radial-gradient(900px 500px at 100% 110%, hsl(188 86% 53% / 0.07), transparent 66%);
+  }
+
+  .desktop-sky::after {
+    content: '';
+    position: absolute;
+    inset: -12%;
+    background:
+      radial-gradient(360px 200px at 16% 74%, hsl(188 90% 60% / 0.07), transparent 68%),
+      radial-gradient(460px 240px at 84% 22%, hsl(255 92% 76% / 0.08), transparent 70%);
+    filter: blur(10px);
+    animation: sand-drift 24s ease-in-out infinite alternate;
+  }
+
+  /* 毛玻璃应用窗口：悬浮在深藏青夜空之上 */
+  .window-glass {
+    background:
+      linear-gradient(180deg, hsl(218 32% 14% / 0.72), hsl(222 38% 8% / 0.82));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px) saturate(120%);
+    -webkit-backdrop-filter: blur(20px) saturate(120%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      0 40px 110px -60px hsl(199 90% 50% / 0.4);
+  }
+
+  /* 窗口边缘隐约透出的青蓝微光 */
+  .window-glass::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      conic-gradient(
+        from 210deg at 50% 50%,
+        hsl(188 86% 53% / 0.18),
+        hsl(255 92% 76% / 0.1),
+        transparent 32%,
+        transparent 62%,
+        hsl(188 86% 53% / 0.14),
+        transparent 100%
+      );
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    padding: 1px;
+    opacity: 0.9;
+  }
+
+  /* 会议详情顶部概念横幅 */
+  .meeting-banner {
+    position: relative;
+    overflow: hidden;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    isolation: isolate;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  .meeting-banner__img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 52%;
+    filter: saturate(0.92) brightness(0.82) contrast(1.06);
+  }
+
+  .meeting-banner__scrim {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, hsl(225 48% 4% / 0.96) 0%, hsl(222 44% 6% / 0.82) 34%, hsl(220 40% 9% / 0.28) 64%, hsl(225 46% 5% / 0.55) 100%),
+      linear-gradient(0deg, hsl(225 46% 4% / 0.78), transparent 55%),
+      linear-gradient(180deg, hsl(199 60% 10% / 0.3), transparent 42%);
+    pointer-events: none;
+  }
+
+  .banner-title {
+    text-shadow: 0 2px 26px hsl(222 80% 5% / 0.55), 0 0 34px hsl(var(--primary) / 0.24);
+  }
+}
+
+@keyframes sand-drift {
+  0% {
+    transform: translate3d(-1.5%, 1%, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(2.5%, -2%, 0) scale(1.08);
   }
 }
 

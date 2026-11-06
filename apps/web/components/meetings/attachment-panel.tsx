@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { resolveMediaUrl } from '@/lib/api/client'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge, Button, EmptyState, ProgressBar } from '@/components/ui/primitives'
 import { useDeleteAttachment, useUploadAttachment } from '@/lib/api/hooks'
@@ -229,7 +230,7 @@ function AttachmentCard({
 }) {
   const meta = ATTACHMENT_KIND_META[attachment.kind]
   const Icon = KIND_ICON[attachment.kind]
-  const url = attachment.url
+  const url = resolveMediaUrl(attachment.url)
 
   return (
     <li className="group overflow-hidden rounded-lg border border-border/60 bg-card/50">

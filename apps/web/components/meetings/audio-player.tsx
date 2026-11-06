@@ -4,6 +4,7 @@ import * as React from 'react'
 import { Pause, Play, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatMs } from '@/lib/format'
+import { resolveMediaUrl } from '@/lib/api/client'
 import { Button } from '@/components/ui/primitives'
 import { Tooltip } from '@/components/ui/overlay'
 
@@ -38,7 +39,8 @@ export function AudioPlayer({
   const [duration, setDuration] = React.useState((durationSec ?? 0) * 1000)
   const [muted, setMuted] = React.useState(false)
   const [rate, setRate] = React.useState(1)
-  const [unavailable, setUnavailable] = React.useState(!src)
+  const resolvedSrc = resolveMediaUrl(src)
+  const [unavailable, setUnavailable] = React.useState(!resolvedSrc)
 
   /* 外部（转写分段点击）驱动 seek */
   React.useEffect(() => {
@@ -85,10 +87,10 @@ export function AudioPlayer({
 
   return (
     <div className={cn('panel overflow-hidden', className)}>
-      {src && (
+      {resolvedSrc && (
         <audio
           ref={audioRef}
-          src={src}
+          src={resolvedSrc}
           preload="metadata"
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration * 1000)}
           onTimeUpdate={(e) => {

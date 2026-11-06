@@ -82,9 +82,12 @@ export function AppShell({
 
   return (
     <TooltipProvider>
-      <div className="flex min-h-dvh">
+      <div className="relative min-h-dvh">
+        <div className="desktop-sky" aria-hidden="true" />
+        <div className="relative z-10 flex min-h-dvh lg:p-6">
+          <div className="window-glass relative flex min-h-dvh w-full flex-col overflow-hidden lg:h-[calc(100dvh-3rem)] lg:min-h-[calc(100dvh-3rem)] lg:flex-row lg:rounded-2xl">
         {/* ------------------------ 桌面侧边栏 ------------------------ */}
-        <aside className="relative sticky top-0 hidden h-dvh w-[252px] shrink-0 flex-col border-r border-border/60 bg-card/45 px-3 py-4 backdrop-blur-xl lg:flex">
+        <aside className="relative hidden h-full w-[252px] shrink-0 flex-col border-r border-white/[0.06] bg-white/[0.02] px-3 py-4 lg:flex">
           <span className="hairline-glow pointer-events-none absolute inset-y-0 right-0 w-px opacity-50" />
 
           <Link href={`/w/${workspaceId}/meetings`} className="mb-4 px-1.5">
@@ -104,7 +107,7 @@ export function AppShell({
                   href={href}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-200',
+                    'relative flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13.5px] transition-all duration-200',
                     active
                       ? 'bg-primary/10 font-medium text-primary shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.22)]'
                       : 'text-muted-foreground hover:bg-surface-hover/70 hover:text-foreground',
@@ -166,7 +169,7 @@ export function AppShell({
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 pb-4 pl-[68px] lg:pl-0">{children}</main>
+          <main className="scroll-thin min-w-0 flex-1 pb-4 pl-[68px] lg:overflow-y-auto lg:pl-0">{children}</main>
 
           {/* 移动端左侧导航栏：搜索 / 成员 / 新建 收在页面左侧 */}
           <nav className="fixed left-0 top-[52px] bottom-0 z-30 flex w-[68px] flex-col items-center gap-1 border-r border-border/60 bg-card/55 py-3 backdrop-blur-xl lg:hidden">
@@ -209,6 +212,8 @@ export function AppShell({
               新建
             </Link>
           </nav>
+        </div>
+          </div>
         </div>
       </div>
     </TooltipProvider>

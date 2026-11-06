@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   Calendar,
   Clock,
+  Copy,
   HardDrive,
   Inbox,
   ListChecks,
@@ -15,10 +16,11 @@ import {
   Search,
   SearchX,
   ScrollText,
+  Trash2,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useMe, useMeeting, useMeetings, useProcessMeeting } from '@/lib/api/hooks'
+import { useDeleteMeeting, useMe, useMeeting, useMeetings, useProcessMeeting } from '@/lib/api/hooks'
 import { ApiError, ERROR_HINT } from '@/lib/api/client'
 import {
   MEETING_STATUSES,
@@ -37,6 +39,10 @@ import {
   Skeleton,
   StatusBadge,
 } from '@/components/ui/primitives'
+import {
+  Dialog,
+  DialogContent,
+} from '@/components/ui/overlay'
 
 /** 与权限矩阵保持一致：访客只读，任何写入口都不出现 */
 const WRITE_ROLES: Role[] = ['owner', 'admin', 'member']
@@ -66,6 +72,7 @@ export default function MeetingsPage() {
   const { data: me } = useMe()
   const role = me?.workspaces.find((w) => w.id === workspaceId)?.role
   const canCreate = Boolean(role && WRITE_ROLES.includes(role))
+  const canDelete = role === 'owner' || role === 'admin'
 
   const { data, isLoading, isError, error, refetch } = useMeetings(workspaceId, {
     status,
@@ -107,7 +114,7 @@ export default function MeetingsPage() {
     <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
       <header className="relative flex flex-wrap items-start justify-between gap-3 pb-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">会议</h1>
+          <h1 className="text-[22px] font-semibold tracking-tight sm:text-[26px]">会议</h1>
           <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
             <span className="size-1.5 shrink-0 rounded-full bg-primary shadow-[0_0_10px_hsl(var(--primary))]" />
             {subtitle}
@@ -221,6 +228,7 @@ export default function MeetingsPage() {
                 meeting={meeting}
                 workspaceId={workspaceId}
                 canProcess={canCreate}
+                canDelete={canDelete && (meeting.permissions?.can_delete ?? true)}
               />
             ))}
           </div>
@@ -238,10 +246,12 @@ function MeetingCard({
   meeting,
   workspaceId,
   canProcess,
+  canDelete,
 }: {
   meeting: Meeting
   workspaceId: string
   canProcess: boolean
+  canDelete: boolean
 }) {
   const meta = MEETING_STATUS_META[meeting.status]
   const isProcessing = meeting.status === 'transcribing' || meeting.status === 'summarizing'
@@ -251,6 +261,7 @@ function MeetingCard({
   const allowRetry = canProcess && (meeting.permissions?.can_process ?? true)
 
   const retry = useProcessMeeting(meeting.id)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const onRetry = async () => {
     try {
@@ -263,10 +274,15 @@ function MeetingCard({
     }
   }
 
+  const copyLink = () => {
+    void navigator.clipboard.writeText(`${window.location.origin}/w/${workspaceId}/meetings/${meeting.id}`)
+    toast.success('会议链接已复制')
+  }
+
   return (
     <article className="panel panel-hover group relative flex flex-col gap-3 p-4 animate-fade-up sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        {/* 链接用 after 覆盖整卡，重试按钮再抬到上层，避免按钮嵌套在链接里 */}
+        {/* 链接用 after 覆盖整卡，其余按钮统一抬到 z-10，避免按钮嵌套在链接里 */}
         <Link
           href={`/w/${workspaceId}/meetings/${meeting.id}`}
           className="min-w-0 rounded-md after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -275,7 +291,33 @@ function MeetingCard({
             {meeting.title}
           </span>
         </Link>
-        <StatusBadge status={meeting.status} className="shrink-0" />
+        <div className="relative z-10 flex shrink-0 items-center gap-1">
+          <StatusBadge status={meeting.status} />
+          {canDelete && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`复制会议链接：${meeting.title}`}
+                title="复制会议链接"
+                className="text-muted-foreground"
+                onClick={copyLink}
+              >
+                <Copy className="size-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`删除会议：${meeting.title}`}
+                className="gap-1 text-status-failed hover:bg-status-failed/10"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="size-3.5" />
+                删除
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -332,7 +374,65 @@ function MeetingCard({
           </div>
         </div>
       )}
+
+      {canDelete && (
+        <DeleteMeetingDialog
+          workspaceId={workspaceId}
+          meetingId={meeting.id}
+          title={meeting.title}
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+        />
+      )}
     </article>
+  )
+}
+
+/** 删除确认弹窗：必须放在下拉菜单之外，否则菜单关闭时弹窗会被一起卸载 */
+function DeleteMeetingDialog({
+  workspaceId,
+  meetingId,
+  title,
+  open,
+  onOpenChange,
+}: {
+  workspaceId: string
+  meetingId: string
+  title: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const del = useDeleteMeeting(workspaceId)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        title="删除这场会议？"
+        description={`「${title}」将被软删除，录音走异步清理，90 天后彻底移除。`}
+      >
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            loading={del.isPending}
+            onClick={() =>
+              del.mutate(meetingId, {
+                onSuccess: () => {
+                  toast.success('会议已删除')
+                  onOpenChange(false)
+                },
+                onError: (err) => toast.error(err.message),
+              })
+            }
+          >
+            确认删除
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

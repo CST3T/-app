@@ -15,6 +15,7 @@ import {
   Paperclip,
   PenLine,
   Share2,
+  Sparkles,
   Trash2,
   Users,
 } from 'lucide-react'
@@ -143,6 +144,28 @@ function MeetingDetailContent() {
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-5 lg:px-6">
+      {/* ------------------------ 商务价值概念横幅 ------------------------ */}
+      <section className="meeting-banner mb-4 h-[188px] sm:h-[204px] lg:h-[224px]">
+        <img
+          src="/images/banner-cash.jpg"
+          alt="商务会谈中把握机会、创造商业价值的概念图"
+          className="meeting-banner__img"
+        />
+        <span className="meeting-banner__scrim" aria-hidden="true" />
+        <div className="relative z-10 flex h-full flex-col justify-center px-5 sm:px-7 lg:px-9">
+          <span className="mb-2 inline-flex w-fit items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary backdrop-blur-sm">
+            <Sparkles className="size-3" />
+            会记 Minutes · 商务时刻
+          </span>
+          <h2 className="banner-title text-xl font-semibold tracking-tight text-foreground sm:text-[22px] lg:text-[26px]">
+            把每场会议，谈成一次机会
+          </h2>
+          <p className="mt-2 max-w-[80%] text-[13px] leading-relaxed text-muted-foreground sm:max-w-[58%] sm:text-sm">
+            纪要沉淀决策，待办推动落地 —— 让讨论直接产生商业价值。
+          </p>
+        </div>
+      </section>
+
       {/* --------------------------- 页头 --------------------------- */}
       <div className="mb-4">
         <div className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -156,7 +179,7 @@ function MeetingDetailContent() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold tracking-tight lg:text-2xl">{meeting.title}</h1>
+              <h1 className="text-[22px] font-semibold tracking-tight lg:text-[26px]">{meeting.title}</h1>
               <StatusBadge status={stream.status ?? meeting.status} />
               {processing && <Badge tone="info">处理中</Badge>}
             </div>
@@ -201,6 +224,7 @@ function MeetingDetailContent() {
             )}
             <ShareDialog
               meetingId={meetingId}
+              meetingTitle={meeting.title}
               canShare={Boolean(permissions?.can_share)}
               trigger={
                 <Button variant="outline" size="sm">

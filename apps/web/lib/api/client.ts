@@ -5,6 +5,19 @@ import type { ApiErrorBody, ApiSuccess, ErrorCode } from './types'
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api/v1'
 
+/** API 服务器根地址（http://127.0.0.1:8000），用于拼接后端返回的相对资源路径 */
+const SERVER_ROOT = API_BASE.replace(/\/api\/v1\/?$/, '')
+
+/**
+ * 后端返回的图片/音频/视频/附件地址可能是相对路径（/api/v1/...），
+ * 直接交给 <img>/<audio>/<a> 会被解析到 Next 端口导致 404，这里统一补全。
+ */
+export function resolveMediaUrl(url?: string | null): string | undefined {
+  if (!url) return undefined
+  if (/^https?:\/\//i.test(url)) return url
+  return `${SERVER_ROOT}${url.startsWith('/') ? url : `/${url}`}`
+}
+
 /** 契约错误码 → 前端处理策略（与文档 1.6 错误码表一一对应） */
 export class ApiError extends Error {
   code: ErrorCode

@@ -16,8 +16,8 @@ export function LogoMark({ className }: { className?: string }) {
       <svg viewBox="0 0 32 32" aria-hidden className="relative size-[76%]">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="1" x2="0" y2="0">
-            <stop offset="0%" stopColor="#2bb8dd" />
-            <stop offset="100%" stopColor="#8f7bff" />
+            <stop offset="0%" stopColor="#22D3EE" />
+            <stop offset="100%" stopColor="#A78BFA" />
           </linearGradient>
         </defs>
         <g fill={`url(#${gradientId})`}>
@@ -27,7 +27,7 @@ export function LogoMark({ className }: { className?: string }) {
           <rect x="20.4" y="9" width="4" height="14" rx="2" />
           <rect x="26.2" y="13" width="4" height="6" rx="2" />
         </g>
-        <circle cx="26.4" cy="26.4" r="2.6" fill="#2bb8dd" />
+        <circle cx="26.4" cy="26.4" r="2.6" fill="#22D3EE" />
       </svg>
     </span>
   )

@@ -4,12 +4,12 @@ import * as AvatarPrimitive from '@radix-ui/react-avatar'
 import { cn } from '@/lib/utils'
 
 const PALETTE = [
-  'bg-[hsl(231_44%_48%)] text-white',
-  'bg-[hsl(172_42%_38%)] text-white',
-  'bg-[hsl(268_44%_52%)] text-white',
-  'bg-[hsl(33_72%_46%)] text-white',
-  'bg-[hsl(210_58%_46%)] text-white',
-  'bg-[hsl(0_52%_50%)] text-white',
+  'bg-[hsl(188_78%_38%)] text-white',
+  'bg-[hsl(158_60%_36%)] text-white',
+  'bg-[hsl(255_68%_58%)] text-white',
+  'bg-[hsl(43_88%_44%)] text-white',
+  'bg-[hsl(210_70%_50%)] text-white',
+  'bg-[hsl(0_70%_52%)] text-white',
 ]
 
 function hashIndex(seed: string) {

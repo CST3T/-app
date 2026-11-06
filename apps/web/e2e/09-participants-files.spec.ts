@@ -1,28 +1,8 @@
 import { test, expect, login } from './fixtures'
-import fs from 'node:fs'
+import path from 'node:path'
 
-/** 生成一个 1 秒 8kHz 单声道静音 WAV，用于创建会议链路 */
-function writeSilentWav(filePath: string) {
-  const sampleRate = 8000
-  const samples = sampleRate
-  const dataSize = samples * 2
-  const buffer = Buffer.alloc(44 + dataSize)
-  buffer.write('RIFF', 0)
-  buffer.writeUInt32LE(36 + dataSize, 4)
-  buffer.write('WAVE', 8)
-  buffer.write('fmt ', 12)
-  buffer.writeUInt32LE(16, 16)
-  buffer.writeUInt16LE(1, 20)
-  buffer.writeUInt16LE(1, 22)
-  buffer.writeUInt32LE(sampleRate, 24)
-  buffer.writeUInt32LE(sampleRate * 2, 28)
-  buffer.writeUInt16LE(2, 32)
-  buffer.writeUInt16LE(16, 34)
-  buffer.write('data', 36)
-  buffer.writeUInt32LE(dataSize, 40)
-  fs.writeFileSync(filePath, buffer)
-  return filePath
-}
+/** 真实中文语音样例：静音音频会被 ASR 拒绝，E2E 必须用有人声的音频 */
+const SPEECH_WAV = path.join(__dirname, 'fixtures/sample-zh.wav')
 
 /** 1x1 透明 PNG，用于资料共享上传 */
 const PIXEL_PNG = Buffer.from(
@@ -31,7 +11,7 @@ const PIXEL_PNG = Buffer.from(
 )
 
 test('创建会议时可添加成员并分别设置会议身份', async ({ page }) => {
-  const wavPath = writeSilentWav(test.info().outputPath('members.wav'))
+  const wavPath = SPEECH_WAV
 
   await login(page)
   await page.goto('/w/ws_demo/meetings/new')

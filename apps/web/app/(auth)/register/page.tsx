@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿'use client'
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿'use client'
 
 import { useState } from 'react'
 import Link from 'next/link'
@@ -117,7 +117,7 @@ export default function RegisterPage() {
 
           <div className="panel p-6 shadow-sm sm:p-7">
             <h2 className="text-xl font-semibold tracking-tight">创建账号</h2>
-            <p className="mt-1 text-sm text-muted-foreground">注册后自动加入演示工作区，可立即体验</p>
+            <p className="mt-1 text-sm text-muted-foreground">注册后从空白状态开始，创建自己的工作区，数据与他人完全隔离</p>
 
             {formError && (
               <div
