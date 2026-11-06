@@ -157,7 +157,7 @@
   <div class="cv-meta">
     <span class="cv-badge">小组号：06</span><span class="cv-badge">作品：会记 Minutes</span>
     <br><br>
-    <b>小组成员：</b>马佰川（前端）、郭顺（后端）、尹元康（数据与平台）、许佳骏（项目负责人 / 质量）
+    <b>小组成员：</b>马佰川（前端）、郭顺（后端）、尹元康（数据与平台）、许佳骏（项目负责人）
     <br>
     <b>文档版本：</b>v1.4　　<b>完成日期：</b>2026 年 11 月
   </div>
@@ -406,12 +406,8 @@
 <section class="page">
   <div class="kicker">第二章 · 系统设计</div>
   <figure>
-    <img src="assets/doc-board.png" alt="看板与失败重试">
-    <figcaption>图 2-5　行动项看板（待办 / 进行中 / 完成三列拖拽）与处理失败横幅：转写结果保留，重试不会重复转写，从失败的摘要阶段续跑</figcaption>
-  </figure>
-  <figure>
     <img src="assets/doc-todos.png" alt="待办处理">
-    <figcaption>图 2-6　跨会议待办处理页：待处理/已逾期/涉及成员/已提醒统计，按人分组展示来源会议、会议时间、截止时间与逾期天数，支持单条或一键提醒、标记完成</figcaption>
+    <figcaption>图 2-5　跨会议待办处理页：待处理/已逾期/涉及成员/已提醒统计，按人分组展示来源会议、会议时间、截止时间与逾期天数，支持单条或一键提醒、标记完成；行动项在看板中按「待办 / 进行中 / 完成」三列拖拽跟进</figcaption>
   </figure>
   <div class="pagenum">— <b>10</b> —</div>
 </section>
@@ -420,18 +416,12 @@
   <div class="kicker">第二章 · 系统设计</div>
   <figure>
     <img src="assets/doc-search.png" alt="搜索">
-    <figcaption>图 2-7　全局搜索：关键词/语义/混合三种模式，结果区分标题、转写、摘要来源，展示相关度并可「跳转到该片片段」</figcaption>
+    <figcaption>图 2-6　全局搜索：关键词/语义/混合三种模式，结果区分标题、转写、摘要来源，展示相关度并可「跳转到该片片段」</figcaption>
   </figure>
-  <div class="img-grid2">
-    <figure style="margin:4px 0">
-      <img src="assets/doc-members.png" alt="成员管理">
-      <figcaption>图 2-8　成员设置：人员库调用、姓名+手机号添加、角色修改与移除</figcaption>
-    </figure>
-    <figure style="margin:4px 0">
-      <img src="assets/ui-mobile.png" class="phone" alt="移动端">
-      <figcaption>图 2-9　移动端 390px：左侧竖向导航，列表无横向溢出</figcaption>
-    </figure>
-  </div>
+  <figure>
+    <img src="assets/doc-members.png" alt="成员管理">
+    <figcaption>图 2-7　成员设置：人员库调用、姓名+手机号添加、角色修改与移除</figcaption>
+  </figure>
   <div class="pagenum">— <b>11</b> —</div>
 </section>
 
@@ -515,7 +505,7 @@ minutes:reset:generation # /dev/reset 时代号自增，Worker 每步校验，�
   <p class="small">用系统提示词强约束大模型「只输出一个 JSON 对象」，字段固定为 topics / key_points / decisions / risks /
   action_items（待办含 owner、due_date，且 owner 只能取自转写中出现过的人名）。返回后经 JSON 解析与结构校验：
   非法则重试一次，仍失败则会议停在 summarizing 阶段、保留转写稿并允许原地重试，绝不产生半截脏数据；
-  HTTP 超时默认 90&nbsp;s，失败文案明确展示给用户（如图 2-5「LLM 响应超过 60s」）。</p>
+  HTTP 超时默认 90&nbsp;s，失败文案会明确展示给用户，并支持从摘要阶段原地重试。</p>
 
   <h4 class="sub">（8）安全链路</h4>
   <ul class="small">
@@ -735,7 +725,7 @@ minutes:reset:generation # /dev/reset 时代号自增，Worker 每步校验，�
     <li><strong>交付工具：</strong>Windows「一键启动-完整版.bat」与免安装启动包的平台打包验证（内置模型/运行时）。</li>
   </ul>
 
-  <h3 class="sec">6.4　许佳骏 —— 项目负责人 / 质量</h3>
+  <h3 class="sec">6.4　许佳骏 —— 项目负责人</h3>
   <p class="small" style="margin-top:2px">交付：PRD/契约/测试/演示与一个前后端垂直切片。具体功能点：</p>
   <ul class="small">
     <li><strong>需求与验收（PM-01）：</strong>编写项目开发文档（产品定位、MVP 边界、权限矩阵、里程碑与退出条件、验收标准）；</li>
